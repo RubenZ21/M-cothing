@@ -5,7 +5,8 @@ import { icon } from './icons.js';
 import { colorName } from './images.js';
 import { renderAdd } from './add.js';
 import { renderBuilder, renderOutfitThumb } from './builder.js';
-import { renderSettings } from './settings.js';
+import { renderSettings, backupDue } from './settings.js';
+import { VERSION } from './version.js';
 
 const app = document.getElementById('app');
 const fileInput = document.getElementById('file-input');
@@ -26,6 +27,9 @@ function tabbar(active) {
   return `<nav class="tabbar" aria-label="Main">
     <a class="tab" href="#/clothes" ${active === 'clothes' ? 'aria-current="page"' : ''}>${icon('hanger')}Clothes</a>
     <a class="tab" href="#/outfits" ${active === 'outfits' ? 'aria-current="page"' : ''}>${icon('grid')}Outfits</a>
+    <a class="tab" href="#/settings" ${active === 'settings' ? 'aria-current="page"' : ''}>
+      <span class="tab-icon">${icon('settings')}${backupDue(state) ? '<span class="dot" title="Time for a backup"></span>' : ''}</span>Settings${backupDue(state) ? '<span class="visually-hidden"> (time for a backup)</span>' : ''}
+    </a>
   </nav>`;
 }
 
@@ -37,7 +41,6 @@ function renderClothes() {
       <h1>Closet</h1>
       <div class="head-actions">
         <span id="count"></span>
-        <button type="button" class="icon-btn" data-act="settings" aria-label="Settings">${icon('settings')}</button>
       </div>
     </header>
     <div class="search">
@@ -56,7 +59,6 @@ function renderClothes() {
     if (!b) return;
     const act = b.dataset.act;
     if (act === 'add') pickPhoto();
-    else if (act === 'settings') go('settings');
     else if (act === 'filter') { state.filter = b.dataset.id; updateClothes(); }
     else if (act === 'item') go(`item/${b.dataset.id}`);
   };
@@ -250,7 +252,7 @@ async function route() {
     case 'outfits': renderOutfits(); break;
     case 'item': renderItem(id); break;
     case 'settings':
-      cleanup = renderSettings(app, { state, reload, onBack: () => go('clothes') });
+      cleanup = renderSettings(app, { state, reload, tabbar: tabbar('settings') });
       break;
     case 'add': {
       if (!pendingFile) { go('clothes'); return; }
@@ -288,6 +290,12 @@ async function route() {
         onClose: () => (history.length > 1 ? history.back() : go('outfits')),
         onSave: (o) => done(o, 'Outfit saved'),
         onDuplicate: (o) => done(o, 'Copy saved'),
+        onRename: async (name) => {
+          outfit.name = name;
+          await db.put('outfits', outfit);
+          await reload();
+          toast('Outfit renamed');
+        },
         onDelete: async (o) => {
           await db.remove('outfits', o.id);
           dropUrl(`o:${o.id}`);
@@ -304,6 +312,7 @@ async function route() {
 }
 
 window.addEventListener('hashchange', route);
+document.getElementById('version').textContent = `v${VERSION}`;
 
 (async () => {
   try {

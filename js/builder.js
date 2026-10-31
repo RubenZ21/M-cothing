@@ -7,11 +7,12 @@ import { makeCanvas, blobToImage, encodeTransparent } from './images.js';
 
 const ASPECT = 4 / 3; // board height / width
 
-export function renderBuilder(root, { outfit, items, startItemId, onSave, onDelete, onDuplicate, onClose }) {
+export function renderBuilder(root, { outfit, items, startItemId, onSave, onDelete, onDuplicate, onRename, onClose }) {
   const itemMap = new Map(items.map((i) => [i.id, i]));
   let pieces = (outfit?.pieces || []).filter((p) => itemMap.has(p.itemId)).map((p) => ({ ...p, key: uid() }));
   let selKey = null;
   let dirty = false;
+  let outfitName = outfit?.name || '';
   const cats = CATEGORIES.filter((c) => items.some((i) => i.category === c.id));
   let tab = cats[0]?.id;
 
@@ -20,7 +21,7 @@ export function renderBuilder(root, { outfit, items, startItemId, onSave, onDele
     <div class="builder">
       <div class="topbar">
         <button type="button" class="icon-btn" data-act="back" aria-label="Back">${icon('back')}</button>
-        <h1>${outfit ? esc(outfit.name) : 'New outfit'}</h1>
+        <h1><button type="button" class="title-btn" data-act="rename"><span class="visually-hidden">Rename outfit: </span><span id="title">${esc(outfitName || 'New outfit')}</span>${icon('pencil')}</button></h1>
         <button type="button" class="btn-small right" data-act="save">Save</button>
       </div>
       <div class="board-wrap" id="bw">
@@ -275,6 +276,7 @@ export function renderBuilder(root, { outfit, items, startItemId, onSave, onDele
       if (dirty && !confirm('Leave without saving this outfit?')) return;
       onClose();
     } else if (act === 'save') openSaveSheet();
+    else if (act === 'rename') openRenameSheet();
     else if (act === 'tab') { tab = b.dataset.id; renderDrawer(); }
     else if (act === 'add') addPiece(b.dataset.id);
     else if (i >= 0 && act === 'front') { pieces.push(...pieces.splice(i, 1)); dirty = true; layout(); }
@@ -293,7 +295,7 @@ export function renderBuilder(root, { outfit, items, startItemId, onSave, onDele
         <h2>${outfit ? 'Save outfit' : 'Save new outfit'}</h2>
         <div>
           <label class="field-label" for="o-name">Name</label>
-          <input id="o-name" class="text-input" type="text" maxlength="60" autocomplete="off" value="${esc(outfit?.name || '')}" placeholder="e.g. Sunday market">
+          <input id="o-name" class="text-input" type="text" maxlength="60" autocomplete="off" value="${esc(outfitName)}" placeholder="e.g. Sunday market">
         </div>
         <div>
           <div class="field-label"><span id="o-seasons">Seasons</span><small>It shows under each one</small></div>
@@ -323,7 +325,7 @@ export function renderBuilder(root, { outfit, items, startItemId, onSave, onDele
       dlg.remove();
     });
     async function finish(asCopy) {
-      let name = dlg.querySelector('#o-name').value.trim() || outfit?.name || 'My outfit';
+      let name = dlg.querySelector('#o-name').value.trim() || outfitName || 'My outfit';
       if (asCopy && name === outfit.name) name += ' (copy)';
       const clean = pieces.map(({ key, ...p }) => p);
       const thumb = await renderOutfitThumb({ pieces: clean }, itemMap);
@@ -341,6 +343,39 @@ export function renderBuilder(root, { outfit, items, startItemId, onSave, onDele
       asCopy ? onDuplicate(o) : onSave(o);
     }
     dlg.showModal();
+  }
+
+  function openRenameSheet() {
+    const dlg = document.createElement('dialog');
+    dlg.className = 'sheet';
+    dlg.innerHTML = `
+      <form method="dialog" class="sheet-body">
+        <h2>Outfit name</h2>
+        <div>
+          <label class="field-label" for="r-name">Name</label>
+          <input id="r-name" class="text-input" type="text" maxlength="60" autocomplete="off" value="${esc(outfitName)}" placeholder="e.g. Sunday market" required>
+        </div>
+        <button type="submit" class="btn-primary" value="ok">${outfit ? 'Save name' : 'Use this name'}</button>
+        <button type="button" class="text-btn center" data-x="close">Cancel</button>
+      </form>`;
+    document.body.appendChild(dlg);
+    dlg.addEventListener('click', (e) => {
+      if (e.target === dlg || e.target.closest('[data-x=close]')) dlg.close();
+    });
+    dlg.addEventListener('close', async () => {
+      const name = dlg.querySelector('#r-name').value.trim();
+      dlg.remove();
+      if (dlg.returnValue !== 'ok' || !name || name === outfitName) return;
+      outfitName = name;
+      root.querySelector('#title').textContent = name;
+      // A saved outfit with no other changes is renamed right away; otherwise the name goes in with Save.
+      if (outfit && !dirty) await onRename(name);
+      else dirty = true;
+    });
+    dlg.showModal();
+    const input = dlg.querySelector('#r-name');
+    input.focus();
+    input.select();
   }
 
   // ---- start ----

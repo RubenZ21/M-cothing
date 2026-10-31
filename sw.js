@@ -1,9 +1,9 @@
 // Offline support. Bump CACHE when releasing so old files are cleared.
-const CACHE = 'wardrobe-v1';
+const CACHE = 'wardrobe-1.01'; // keep in step with js/version.js
 const SHELL = [
   './', 'index.html', 'styles.css', 'manifest.webmanifest',
   'js/app.js', 'js/add.js', 'js/bg.js', 'js/builder.js', 'js/constants.js', 'js/db.js',
-  'js/icons.js', 'js/images.js', 'js/settings.js', 'js/util.js',
+  'js/icons.js', 'js/images.js', 'js/settings.js', 'js/util.js', 'js/version.js',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png'
 ];
 

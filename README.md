@@ -10,8 +10,10 @@ It is a small web app that installs on a phone (PWA), like Minja's Kitchen.
 - **Clothes:** tap **+**, take a photo or pick one from the gallery. The background is removed on the phone itself, and you can touch up the edges with an erase/restore brush. Pick a category, seasons and (optionally) a name. The main colour is detected from the photo.
 - **Closet:** clothes are grouped by type (Tops, Pants, Skirts, Dresses, Jackets, Shoes, Hats, Bags, Accessories), with search and filters.
 - **Outfit builder:** tap clothes to place them on a board. Drag to move, pinch to resize and rotate (or drag the round corner handle), and use Front / Back / Mirror / Remove.
-- **Outfits:** grouped by season, with the current season first. Outfits can be edited, duplicated and deleted.
-- **Backup:** Settings → *Save a backup* writes one `.json` file with all photos and outfits. *Restore from a backup* reads it back.
+- **Outfits:** grouped by season, with the current season first. Outfits can be edited, renamed (tap the name at the top of the builder), duplicated and deleted.
+- **Settings tab:** backup and restore, storage protection, background-removal quality, install help.
+- **Backup:** Settings → *Save a backup* writes one `.json` file with every photo, piece and outfit. Save it off the phone (Google Drive, iCloud Drive, email). *Restore from a backup* reads it back, also on a new phone. The Settings tab shows a red dot when the last backup is more than 30 days old.
+- **Version:** shown in small letters at the top of every screen. It goes up by 0.01 with every change (see `CLAUDE.md`).
 
 ## Photos and privacy
 
@@ -45,7 +47,8 @@ After a minute the app is at `https://rubenz21.github.io/M-cothing/`.
 | `js/app.js` | Screens (Closet, Outfits, piece details) and navigation |
 | `js/add.js` | New piece: photo, background removal, touch up, details |
 | `js/builder.js` | Outfit board and outfit thumbnails |
-| `js/settings.js` | Storage, quality, backup/restore |
+| `js/settings.js` | Settings tab: backup/restore, storage, quality |
+| `js/version.js` | App version shown at the top (bump with every commit) |
 | `js/bg.js` | Loads the background-removal library |
 | `js/db.js` | IndexedDB storage |
 | `js/images.js` | Resizing, trimming, colour detection |
