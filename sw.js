@@ -1,5 +1,6 @@
-// Offline support. Bump CACHE when releasing so old files are cleared.
-const CACHE = 'wardrobe-1.03'; // keep in step with js/version.js
+// Offline support. Online, the app always loads the newest files; the cache is
+// only used when the network is unavailable. Bump CACHE with every release.
+const CACHE = 'wardrobe-1.04'; // keep in step with js/version.js
 const SHELL = [
   './', 'index.html', 'styles.css', 'manifest.webmanifest',
   'js/app.js', 'js/add.js', 'js/bg.js', 'js/builder.js', 'js/constants.js', 'js/db.js',
@@ -8,7 +9,10 @@ const SHELL = [
 ];
 
 self.addEventListener('install', (e) => {
-  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
+  // cache: 'reload' skips the browser's HTTP cache so a new version never stores old files.
+  e.waitUntil(caches.open(CACHE)
+    .then((c) => c.addAll(SHELL.map((u) => new Request(u, { cache: 'reload' }))))
+    .then(() => self.skipWaiting()));
 });
 
 self.addEventListener('activate', (e) => {
@@ -19,7 +23,25 @@ self.addEventListener('activate', (e) => {
   );
 });
 
-// Serve from cache, refresh in the background (the next start gets the update).
+// App files: ask the server first (a quick "has it changed?" check), fall back to
+// the cache when offline or when the network takes too long.
+async function networkFirst(req) {
+  const cache = await caches.open(CACHE);
+  const fresh = fetch(req.mode === 'navigate' ? req.url : req, { cache: 'no-cache' }).then((res) => {
+    if (res.ok) cache.put(req, res.clone());
+    return res;
+  });
+  const timeout = new Promise((resolve) => setTimeout(resolve, 5000, null));
+  try {
+    const res = await Promise.race([fresh, timeout]);
+    if (res) return res;
+  } catch { /* offline */ }
+  const hit = await cache.match(req, { ignoreSearch: true })
+    || (req.mode === 'navigate' ? await cache.match('index.html') : null);
+  return hit || fresh.catch(() => Response.error());
+}
+
+// Fonts rarely change: serve from cache, refresh in the background.
 async function staleWhileRevalidate(req) {
   const cache = await caches.open(CACHE);
   const hit = await cache.match(req, { ignoreSearch: true });
@@ -55,5 +77,6 @@ self.addEventListener('fetch', (e) => {
   const sameOrigin = url.origin === self.location.origin;
   const fonts = url.hostname === 'fonts.googleapis.com' || url.hostname === 'fonts.gstatic.com';
   // The background-removal model is cached by its own library; let it pass.
-  if (sameOrigin || fonts) e.respondWith(staleWhileRevalidate(req));
+  if (sameOrigin) e.respondWith(networkFirst(req));
+  else if (fonts) e.respondWith(staleWhileRevalidate(req));
 });

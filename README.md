@@ -57,7 +57,7 @@ After a minute the app is at `https://rubenz21.github.io/M-cothing/`.
 | `js/db.js` | IndexedDB storage |
 | `js/images.js` | Resizing, trimming, colour detection |
 | `vendor/bg-removal.js` | `@imgly/background-removal` 1.7.0 with `onnxruntime-web` 1.21.0, bundled into one file with esbuild |
-| `sw.js` | Offline support; bump `CACHE` when releasing |
+| `sw.js` | Offline support: newest files when online, cached copy when offline; bump `CACHE` when releasing |
 | `manifest.webmanifest`, `icons/` | App name, colours and icons for installing |
 
 ## License note

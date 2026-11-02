@@ -429,6 +429,19 @@ document.getElementById('version').textContent = `v${VERSION}`;
   route();
 })();
 
-if ('serviceWorker' in navigator && location.protocol === 'https:') {
-  navigator.serviceWorker.register('sw.js').catch((e) => console.warn('Service worker not registered', e));
+if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
+  // When a new version takes over, reload once so it shows straight away.
+  const hadController = !!navigator.serviceWorker.controller;
+  let reloading = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!hadController || reloading) return;
+    reloading = true;
+    location.reload();
+  });
+  navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then((reg) => {
+    // An installed app can stay open for days: check for updates when it comes back to the front.
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') reg.update().catch(() => {});
+    });
+  }).catch((e) => console.warn('Service worker not registered', e));
 }
