@@ -15,7 +15,7 @@ function lastBackup() {
 
 /** True when there are clothes and no backup was saved in the last 30 days. */
 export function backupDue(state) {
-  return state.items.length > 0 && Date.now() - lastBackup() > BACKUP_EVERY_DAYS * 86400000;
+  return (state.items.length > 0 || state.wishes.length > 0) && Date.now() - lastBackup() > BACKUP_EVERY_DAYS * 86400000;
 }
 
 export function renderSettings(root, { state, reload, tabbar }) {
@@ -25,7 +25,7 @@ export function renderSettings(root, { state, reload, tabbar }) {
     <div class="settings">
       <section class="card">
         <h2>Backup</h2>
-        <p class="muted">All clothes, photos and outfits live only on this phone. If the phone is lost or broken, they are gone, unless you have a backup.</p>
+        <p class="muted">All clothes, photos, outfits and wishes live only on this phone. If the phone is lost or broken, they are gone, unless you have a backup.</p>
         <p class="muted">Save the backup somewhere off the phone: Google Drive, iCloud Drive (<em>Save to Files</em>), or email it to yourself. To move to a new phone, open the app there and restore the file.</p>
         <p id="last-backup" class="backup-status"></p>
         <button type="button" class="btn-primary" data-act="export">${icon('download')} Save a backup</button>
@@ -57,7 +57,7 @@ export function renderSettings(root, { state, reload, tabbar }) {
 
       <section class="card">
         <h2>Start over</h2>
-        <button type="button" class="btn-secondary danger" data-act="wipe">${icon('trash')} Delete all clothes and outfits</button>
+        <button type="button" class="btn-secondary danger" data-act="wipe">${icon('trash')} Delete all clothes, outfits and wishes</button>
       </section>
       <p class="muted small center">Minja's Wardrobe v${VERSION} · Background removal by IMG.LY (AGPL)</p>
     </div>
@@ -71,13 +71,13 @@ export function renderSettings(root, { state, reload, tabbar }) {
     if (!due) root.querySelectorAll('.tab .dot, .tab .visually-hidden').forEach((d) => d.remove());
     el.textContent = t
       ? `Last backup: ${new Date(t).toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' })}${due ? ' — time for a new one' : ''}`
-      : state.items.length ? 'No backup saved yet.' : 'Nothing to back up yet.';
-    root.querySelector('[data-act=export]').disabled = !state.items.length && !state.outfits.length;
+      : state.items.length || state.wishes.length ? 'No backup saved yet.' : 'Nothing to back up yet.';
+    root.querySelector('[data-act=export]').disabled = !state.items.length && !state.outfits.length && !state.wishes.length;
   }
 
   async function showStorage() {
     const usage = root.querySelector('#usage');
-    const counts = `${plural(state.items.length, 'piece')} and ${plural(state.outfits.length, 'outfit')}`;
+    const counts = `${plural(state.items.length, 'piece')}, ${plural(state.outfits.length, 'outfit')} and ${plural(state.wishes.length, 'wish', 'wishes')}`;
     try {
       const est = await navigator.storage?.estimate?.();
       usage.textContent = est ? `${counts}, using ${(est.usage / 1048576).toFixed(1)} MB.` : `${counts}.`;
@@ -100,12 +100,14 @@ export function renderSettings(root, { state, reload, tabbar }) {
       if (data.app !== 'wardrobe' || !Array.isArray(data.items)) throw new Error('Not a wardrobe backup');
       const items = await Promise.all(data.items.map(async (i) => ({ ...i, image: await dataUrlToBlob(i.image), thumb: await dataUrlToBlob(i.thumb) })));
       const outfits = await Promise.all((data.outfits || []).map(async (o) => ({ ...o, thumb: await dataUrlToBlob(o.thumb) })));
+      const wishes = await Promise.all((data.wishes || []).map(async (w) => ({ ...w, image: await dataUrlToBlob(w.image), thumb: await dataUrlToBlob(w.thumb) })));
       await db.putMany('items', items);
       await db.putMany('outfits', outfits);
+      await db.putMany('wishes', wishes);
       await reload();
       showLastBackup();
       showStorage();
-      toast(`Restored ${plural(items.length, 'piece')} and ${plural(outfits.length, 'outfit')}`);
+      toast(`Restored ${plural(items.length, 'piece')}, ${plural(outfits.length, 'outfit')} and ${plural(wishes.length, 'wish', 'wishes')}`);
     } catch (err) {
       console.error(err);
       alert('That file could not be restored. Choose a backup saved by this app.');
@@ -140,10 +142,11 @@ export function renderSettings(root, { state, reload, tabbar }) {
       b.disabled = true;
       try { await exportBackup(); } finally { b.disabled = false; showLastBackup(); }
     } else if (act === 'wipe') {
-      if (!confirm('Delete ALL clothes and outfits from this phone? This cannot be undone.')) return;
+      if (!confirm('Delete ALL clothes, outfits and wishes from this phone? This cannot be undone.')) return;
       if (state.items.length && !confirm('Last check: do you have a backup? Tap OK to delete everything.')) return;
       await db.clear('items');
       await db.clear('outfits');
+      await db.clear('wishes');
       await reload();
       showLastBackup();
       showStorage();
@@ -163,6 +166,11 @@ export function renderSettings(root, { state, reload, tabbar }) {
     for (const [k, o] of state.outfits.entries()) {
       if (k) parts.push(',');
       parts.push(JSON.stringify({ ...o, thumb: await blobToDataUrl(o.thumb) }));
+    }
+    parts.push('],"wishes":[');
+    for (const [k, w] of state.wishes.entries()) {
+      if (k) parts.push(',');
+      parts.push(JSON.stringify({ ...w, image: await blobToDataUrl(w.image), thumb: await blobToDataUrl(w.thumb) }));
     }
     parts.push(']}');
     const name = `wardrobe-backup-${new Date().toISOString().slice(0, 10)}.json`;

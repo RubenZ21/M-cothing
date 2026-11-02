@@ -2,7 +2,8 @@ import * as db from './db.js';
 import { CATEGORIES, SEASONS, catById, seasonsFromNow, currentSeason } from './constants.js';
 import { esc, toast, blobUrl, dropUrl, plural } from './util.js';
 import { icon } from './icons.js';
-import { colorName } from './images.js';
+import { colorName, blobToCanvas, fitCanvas, encodeTransparent, dominantColor } from './images.js';
+import { renderWishlist, renderWishForm } from './wish.js';
 import { renderAdd } from './add.js';
 import { renderBuilder, renderOutfitThumb } from './builder.js';
 import { renderSettings, backupDue } from './settings.js';
@@ -10,13 +11,15 @@ import { VERSION } from './version.js';
 
 const app = document.getElementById('app');
 const fileInput = document.getElementById('file-input');
-const state = { items: [], outfits: [], filter: 'all', query: '' };
+const state = { items: [], outfits: [], wishes: [], filter: 'all', query: '' };
 let cleanup = null;
 let pendingFile = null;
+let pendingTarget = 'add'; // which screen the chosen photo goes to: 'add' (closet) or 'wish/new'
 
 async function reload() {
-  const [items, outfits] = await Promise.all([db.all('items'), db.all('outfits')]);
+  const [items, outfits, wishes] = await Promise.all([db.all('items'), db.all('outfits'), db.all('wishes')]);
   state.items = items.sort((a, b) => b.created - a.created);
+  state.wishes = wishes.sort((a, b) => b.created - a.created);
   state.outfits = outfits.sort((a, b) => (b.updated || b.created) - (a.updated || a.created));
 }
 
@@ -27,6 +30,7 @@ function tabbar(active) {
   return `<nav class="tabbar" aria-label="Main">
     <a class="tab" href="#/clothes" ${active === 'clothes' ? 'aria-current="page"' : ''}>${icon('hanger')}Clothes</a>
     <a class="tab" href="#/outfits" ${active === 'outfits' ? 'aria-current="page"' : ''}>${icon('grid')}Outfits</a>
+    <a class="tab" href="#/wishlist" ${active === 'wishlist' ? 'aria-current="page"' : ''}>${icon('heart')}Wishlist</a>
     <a class="tab" href="#/settings" ${active === 'settings' ? 'aria-current="page"' : ''}>
       <span class="tab-icon">${icon('settings')}${backupDue(state) ? '<span class="dot" title="Time for a backup"></span>' : ''}</span>Settings${backupDue(state) ? '<span class="visually-hidden"> (time for a backup)</span>' : ''}
     </a>
@@ -58,7 +62,7 @@ function renderClothes() {
     const b = e.target.closest('[data-act]');
     if (!b) return;
     const act = b.dataset.act;
-    if (act === 'add') pickPhoto();
+    if (act === 'add') pickPhoto('add');
     else if (act === 'filter') { state.filter = b.dataset.id; updateClothes(); }
     else if (act === 'item') go(`item/${b.dataset.id}`);
   };
@@ -101,7 +105,8 @@ function updateClothes() {
     </section>`).join('');
 }
 
-function pickPhoto() {
+function pickPhoto(target) {
+  pendingTarget = target;
   fileInput.value = '';
   fileInput.click();
 }
@@ -109,7 +114,7 @@ fileInput.addEventListener('change', () => {
   const f = fileInput.files[0];
   if (!f) return;
   pendingFile = f;
-  if (location.hash === '#/add') route(); else go('add');
+  if (location.hash === `#/${pendingTarget}`) route(); else go(pendingTarget);
 });
 
 // ---------------- Outfits ----------------
@@ -183,6 +188,7 @@ function renderItem(id) {
         <div class="grow"><strong id="color-name">${esc(item.colorName || 'Colour')}</strong></div>
         <label class="link-btn">Change<input type="color" id="color-input" class="visually-hidden" value="${esc(item.color)}"></label>
       </div>
+      ${item.link ? `<a class="btn-secondary" href="${esc(item.link)}" target="_blank" rel="noopener noreferrer">${icon('external')} Shop page</a>` : ''}
       <div>
         <div class="field-label"><span>In outfits</span><small>${plural(usedIn.length, 'outfit')}</small></div>
         ${usedIn.length ? `<div class="mini-row">${usedIn.map((o) => `<button type="button" class="mini" data-act="outfit" data-id="${o.id}" aria-label="${esc(o.name)}"><img src="${blobUrl(`o:${o.id}`, o.thumb)}" alt=""></button>`).join('')}</div>` : '<p class="muted small">Not used in an outfit yet.</p>'}
@@ -243,6 +249,48 @@ function renderItem(id) {
   };
 }
 
+// ---------------- Wishlist helpers ----------------
+/** A page shared into the app (Android "Share" → Wardrobe), parked by the service worker. */
+async function takeShared() {
+  if (!('caches' in window)) return null;
+  try {
+    const cache = await caches.open('wardrobe-share');
+    const metaRes = await cache.match('shared-meta');
+    if (!metaRes) return null;
+    const meta = await metaRes.json();
+    const imgRes = await cache.match('shared-image');
+    await cache.delete('shared-meta');
+    await cache.delete('shared-image');
+    const { findUrl } = await import('./link.js');
+    const url = findUrl(meta.url) || findUrl(meta.text);
+    const file = imgRes ? await imgRes.blob() : null;
+    return { url, title: meta.title || '', file: file && file.size ? file : null };
+  } catch (err) {
+    console.error(err);
+    return null;
+  }
+}
+
+async function wishToItem(w) {
+  const c = await blobToCanvas(w.image);
+  const full = fitCanvas(c, 1000);
+  const hex = dominantColor(c);
+  return {
+    id: w.id,
+    name: w.name,
+    category: w.category,
+    seasons: [],
+    color: hex,
+    colorName: colorName(hex),
+    w: full.width,
+    h: full.height,
+    image: await encodeTransparent(full),
+    thumb: await encodeTransparent(fitCanvas(c, 360)),
+    link: w.url || '',
+    created: Date.now()
+  };
+}
+
 // ---------------- Router ----------------
 async function route() {
   if (cleanup) { cleanup(); cleanup = null; }
@@ -268,6 +316,62 @@ async function route() {
           toast(`Saved to ${catById(item.category).label}`);
           if (state.items.length === 1) navigator.storage?.persist?.().catch(() => {});
           history.replaceState(null, '', '#/clothes');
+          route();
+        }
+      });
+      break;
+    }
+    case 'wishlist':
+      cleanup = renderWishlist(app, {
+        wishes: state.wishes,
+        tabbar: tabbar('wishlist'),
+        onAdd: () => pickPhoto('wish/new'),
+        onEdit: (wid) => go(`wish/${wid}`)
+      });
+      break;
+    case 'wish': {
+      let wish = null, file = null, shared = null;
+      if (id === 'new') {
+        file = pendingFile;
+        pendingFile = null;
+        if (!file) { go('wishlist'); return; }
+      } else if (id === 'shared') {
+        shared = await takeShared();
+        file = shared?.file || null;
+        if (!shared) { go('wishlist'); return; }
+      } else {
+        wish = state.wishes.find((w) => w.id === id);
+        if (!wish) { go('wishlist'); return; }
+      }
+      const back = (msg) => {
+        if (msg) toast(msg);
+        history.replaceState(null, '', '#/wishlist');
+        route();
+      };
+      cleanup = renderWishForm(app, {
+        wish,
+        file,
+        shared,
+        onCancel: () => back(),
+        onSave: async (w) => {
+          await db.put('wishes', w);
+          await reload();
+          back(wish ? 'Saved' : 'Added to your wishlist');
+        },
+        onDelete: async (w) => {
+          await db.remove('wishes', w.id);
+          dropUrl(`w:${w.id}`);
+          await reload();
+          back('Removed from the wishlist');
+        },
+        onMoveToCloset: async (w) => {
+          const item = await wishToItem(w);
+          await db.put('items', item);
+          await db.remove('wishes', w.id);
+          dropUrl(`w:${w.id}`);
+          await reload();
+          toast(`Moved to ${catById(item.category).label}`);
+          history.replaceState(null, '', `#/item/${item.id}`);
           route();
         }
       });
