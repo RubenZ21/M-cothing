@@ -77,10 +77,44 @@ async function pngText(buf) {
 }
 
 /**
- * Looks for a web link saved inside the image file (PNG text chunks, EXIF or
- * XMP). Phone screenshots usually don't contain one, so '' is the normal result.
+ * Samsung phones append a block after the image data ("SEF" trailer) with an
+ * entry "Captured_App_Info": base64 JSON like
+ * {"comp":"com.sec.android.app.sbrowser/...","capurl":"https://..."}.
+ * The gallery's "go to source" button uses this link.
+ */
+async function samsungCaptureUrl(file) {
+  const tail = new Uint8Array(await file.slice(Math.max(0, file.size - 128 * 1024)).arrayBuffer());
+  const text = latin1(tail);
+  const at = text.lastIndexOf('Captured_App_Info');
+  if (at < 0) return '';
+  const b64 = (text.slice(at + 'Captured_App_Info'.length).match(/^[A-Za-z0-9+/=]+/) || [''])[0];
+  // The base64 runs straight into the next marker ("SEFH…"), so trim until it decodes.
+  for (let cut = 0; cut <= 12 && cut < b64.length; cut++) {
+    const s = b64.slice(0, b64.length - cut);
+    if (s.length % 4) continue;
+    try {
+      const json = utf8(Uint8Array.from(atob(s), (c) => c.charCodeAt(0)));
+      const data = JSON.parse(json);
+      const url = normalizeUrl(data.capurl || data.url || '');
+      if (url) return url;
+      const found = findUrl(json);
+      if (found) return found;
+    } catch { /* try a shorter slice */ }
+  }
+  return '';
+}
+
+/**
+ * Looks for a web link saved inside the image file: Samsung's screenshot info,
+ * PNG text chunks, EXIF or XMP. Other phones' screenshots usually have none.
  */
 export async function urlFromImageMetadata(file) {
+  try {
+    const samsung = await samsungCaptureUrl(file);
+    if (samsung) return samsung;
+  } catch (err) {
+    console.warn('Could not read Samsung screenshot info', err);
+  }
   try {
     const buf = await file.slice(0, 4 * 1024 * 1024).arrayBuffer();
     const head = new Uint8Array(buf, 0, Math.min(8, buf.byteLength));

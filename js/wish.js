@@ -35,7 +35,7 @@ export function renderWishlist(root, { wishes, tabbar, onAdd, onEdit }) {
     ${wishes.length ? `<div class="wgrid">${wishes.map(card).join('')}</div>` : `<div class="empty">
       <h2>Nothing on the wishlist yet</h2>
       <p>Found something you love online? Take a screenshot, then tap <strong>+</strong> and choose it.</p>
-      <p class="small">Copy the page's link first (Share → Copy) and the app can paste it in for you. Tap a picture later to go straight to the shop.</p>
+      <p class="small">On a Samsung phone the shop link is read from the screenshot by itself. Otherwise copy the page's link first (Share → Copy) and tap Paste. Tap a picture later to go straight to the shop.</p>
     </div>`}
     <button type="button" class="fab" data-act="add" aria-label="Add to wishlist">${icon('plus')}</button>
     ${tabbar}`;

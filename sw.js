@@ -1,5 +1,5 @@
 // Offline support. Bump CACHE when releasing so old files are cleared.
-const CACHE = 'wardrobe-1.02'; // keep in step with js/version.js
+const CACHE = 'wardrobe-1.03'; // keep in step with js/version.js
 const SHELL = [
   './', 'index.html', 'styles.css', 'manifest.webmanifest',
   'js/app.js', 'js/add.js', 'js/bg.js', 'js/builder.js', 'js/constants.js', 'js/db.js',
