@@ -81,12 +81,13 @@ async function pngText(buf) {
  * entry "Captured_App_Info": base64 JSON like
  * {"comp":"com.sec.android.app.sbrowser/...","capurl":"https://..."}.
  * The gallery's "go to source" button uses this link.
+ * Returns null when the block is missing, else the decoded data ({} if unreadable).
  */
-async function samsungCaptureUrl(file) {
+async function samsungCaptureInfo(file) {
   const tail = new Uint8Array(await file.slice(Math.max(0, file.size - 128 * 1024)).arrayBuffer());
   const text = latin1(tail);
   const at = text.lastIndexOf('Captured_App_Info');
-  if (at < 0) return '';
+  if (at < 0) return null;
   const b64 = (text.slice(at + 'Captured_App_Info'.length).match(/^[A-Za-z0-9+/=]+/) || [''])[0];
   // The base64 runs straight into the next marker ("SEFH…"), so trim until it decodes.
   for (let cut = 0; cut <= 12 && cut < b64.length; cut++) {
@@ -95,26 +96,36 @@ async function samsungCaptureUrl(file) {
     try {
       const json = utf8(Uint8Array.from(atob(s), (c) => c.charCodeAt(0)));
       const data = JSON.parse(json);
-      const url = normalizeUrl(data.capurl || data.url || '');
-      if (url) return url;
-      const found = findUrl(json);
-      if (found) return found;
+      const url = normalizeUrl(data.capurl || data.url || '') || findUrl(json);
+      return { ...data, url };
     } catch { /* try a shorter slice */ }
   }
-  return '';
+  return {};
 }
 
 /**
- * Looks for a web link saved inside the image file: Samsung's screenshot info,
- * PNG text chunks, EXIF or XMP. Other phones' screenshots usually have none.
+ * Everything the app can tell about a picture's origin, for filling in the link
+ * and for explaining why none was found.
  */
-export async function urlFromImageMetadata(file) {
+export async function inspectImage(file) {
+  const info = { name: file.name || '', type: file.type || '', size: file.size, url: '', samsung: null };
   try {
-    const samsung = await samsungCaptureUrl(file);
-    if (samsung) return samsung;
+    info.samsung = await samsungCaptureInfo(file);
+    if (info.samsung?.url) { info.url = info.samsung.url; return info; }
   } catch (err) {
     console.warn('Could not read Samsung screenshot info', err);
   }
+  info.url = await otherMetadataUrl(file);
+  return info;
+}
+
+/** Just the link (or ''). */
+export async function urlFromImageMetadata(file) {
+  return (await inspectImage(file)).url;
+}
+
+/** A link in PNG text chunks, EXIF or XMP. */
+async function otherMetadataUrl(file) {
   try {
     const buf = await file.slice(0, 4 * 1024 * 1024).arrayBuffer();
     const head = new Uint8Array(buf, 0, Math.min(8, buf.byteLength));

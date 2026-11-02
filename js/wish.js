@@ -6,7 +6,7 @@ import { removeBackground } from './bg.js';
 import {
   fileToCanvas, blobToCanvas, canvasToBlob, makeCanvas, trimAlpha, fitCanvas, encodeTransparent
 } from './images.js';
-import { findUrl, normalizeUrl, siteName, urlFromImageMetadata } from './link.js';
+import { findUrl, normalizeUrl, siteName, inspectImage } from './link.js';
 
 // ---------------- List ----------------
 export function renderWishlist(root, { wishes, tabbar, onAdd, onEdit }) {
@@ -99,6 +99,11 @@ export function renderWishForm(root, { wish, file, shared, onSave, onDelete, onM
           <button type="button" class="tool-btn" data-act="paste">${icon('clipboard')} Paste</button>
         </div>
         <a id="open-link" class="link-btn" target="_blank" rel="noopener noreferrer" hidden>${icon('external')} Open the page</a>
+        <div class="no-link" id="no-link" hidden>
+          <p><strong>No link found in this picture.</strong> <span id="no-link-why"></span></p>
+          <label class="btn-secondary">${icon('upload')} Choose it again from Files<input type="file" id="shot-files" accept="image/*,application/octet-stream,*/*" class="visually-hidden"></label>
+          <details><summary>What the app saw</summary><pre id="no-link-details"></pre></details>
+        </div>
       </div>
       <div>
         <label class="field-label" for="name">Name <small>Optional</small></label>
@@ -285,14 +290,38 @@ export function renderWishForm(root, { wish, file, shared, onSave, onDelete, onM
     box = { x: 0.06, y: 0.12, w: 0.88, h: 0.62 };
     busy = false;
     draw(); refresh();
-    if (!normalizeUrl(urlInput.value)) {
-      const found = await urlFromImageMetadata(f);
-      if (found) setUrl(found, 'Found in the screenshot');
+    const hadLink = !!normalizeUrl(urlInput.value) && $('#url-src').textContent !== 'Found in the screenshot';
+    const info = await inspectImage(f);
+    if (info.url && !hadLink) setUrl(info.url, 'Found in the screenshot');
+    showNoLink(info.url || hadLink ? null : info);
+  }
+
+  // Explains a missing link, and offers picking the original file instead of a copy.
+  function showNoLink(info) {
+    $('#no-link').hidden = !info;
+    if (!info) return;
+    const app = String(info.samsung?.comp || '').split('/')[0];
+    let why;
+    if (!info.samsung) {
+      why = 'The phone handed the app a copy without the screenshot info. Choose it again from Files (or the Gallery/My Files app), not from Photos or the recent row.';
+    } else if (app && !/sbrowser/.test(app)) {
+      why = `This screenshot was taken in ${app === 'com.android.chrome' ? 'Chrome' : app}, which doesn't store the page address. Samsung Internet does, or use Paste.`;
+    } else {
+      why = 'The screenshot info has no page address. Use Paste instead.';
     }
+    $('#no-link-why').textContent = why;
+    $('#no-link-details').textContent = [
+      `File: ${info.name || '(no name)'}`,
+      `Type: ${info.type || '?'}, ${(info.size / 1024).toFixed(0)} KB`,
+      `Samsung screenshot info: ${info.samsung ? 'found' : 'not in this file'}`,
+      info.samsung ? `App: ${info.samsung.comp || '?'}` : '',
+      info.samsung ? `Address: ${info.samsung.capurl || '(none)'}` : ''
+    ].filter(Boolean).join('\n');
   }
   $('#shot').addEventListener('change', (e) => { const f = e.target.files[0]; if (f) loadFile(f); });
+  $('#shot-files').addEventListener('change', (e) => { const f = e.target.files[0]; if (f) loadFile(f); });
 
-  urlInput.addEventListener('input', () => { $('#url-src').textContent = ''; refresh(); });
+  urlInput.addEventListener('input', () => { $('#url-src').textContent = ''; if (normalizeUrl(urlInput.value)) $('#no-link').hidden = true; refresh(); });
   urlInput.addEventListener('blur', () => {
     const u = findUrl(urlInput.value);
     if (u && u !== urlInput.value) urlInput.value = u;
@@ -315,7 +344,7 @@ export function renderWishForm(root, { wish, file, shared, onSave, onDelete, onM
       try {
         const text = await navigator.clipboard.readText();
         const u = findUrl(text);
-        if (u) setUrl(u, 'Pasted');
+        if (u) { setUrl(u, 'Pasted'); $('#no-link').hidden = true; }
         else alert('There is no link on the clipboard. In the browser, use Share → Copy (or copy the address bar), then tap Paste again.');
       } catch {
         urlInput.focus();
