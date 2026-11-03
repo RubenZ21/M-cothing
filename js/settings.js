@@ -3,7 +3,7 @@ import * as db from './db.js';
 import { icon } from './icons.js';
 import { toast, plural } from './util.js';
 import { MODELS, getModel, setModel, preloadModel } from './bg.js';
-import { blobToDataUrl, dataUrlToBlob } from './images.js';
+import { buildBackupZip, readBackup } from './backup.js';
 import { VERSION } from './version.js';
 
 const LAST_BACKUP_KEY = 'wardrobe.lastBackup';
@@ -26,10 +26,11 @@ export function renderSettings(root, { state, reload, tabbar }) {
       <section class="card">
         <h2>Backup</h2>
         <p class="muted">All clothes, photos, outfits and wishes live only on this phone. If the phone is lost or broken, they are gone, unless you have a backup.</p>
-        <p class="muted">Save the backup somewhere off the phone: Google Drive, iCloud Drive (<em>Save to Files</em>), or email it to yourself. To move to a new phone, open the app there and restore the file.</p>
+        <p class="muted">The backup is one <strong>.zip</strong> file with all pictures and details. <strong>Save it on this phone</strong> (Downloads folder), and now and then <strong>send a copy</strong> to Google Drive or your email, so it survives if the phone is lost. To move to a new phone, open the app there and restore the file.</p>
         <p id="last-backup" class="backup-status"></p>
-        <button type="button" class="btn-primary" data-act="export">${icon('download')} Save a backup</button>
-        <label class="btn-secondary">${icon('upload')} Restore from a backup<input type="file" id="import" accept="application/json,.json" class="visually-hidden"></label>
+        <button type="button" class="btn-primary" data-act="save-backup">${icon('download')} Save backup on this phone</button>
+        <button type="button" class="btn-secondary" data-act="send-backup" id="send-backup">${icon('share')} Send backup to… (Drive, email)</button>
+        <label class="btn-secondary">${icon('upload')} Restore from a backup<input type="file" id="import" accept=".zip,application/zip,application/x-zip-compressed,application/json,.json" class="visually-hidden"></label>
       </section>
 
       <section class="card">
@@ -72,7 +73,9 @@ export function renderSettings(root, { state, reload, tabbar }) {
     el.textContent = t
       ? `Last backup: ${new Date(t).toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' })}${due ? ' — time for a new one' : ''}`
       : state.items.length || state.wishes.length ? 'No backup saved yet.' : 'Nothing to back up yet.';
-    root.querySelector('[data-act=export]').disabled = !state.items.length && !state.outfits.length && !state.wishes.length;
+    const empty = !state.items.length && !state.outfits.length && !state.wishes.length;
+    root.querySelector('[data-act=save-backup]').disabled = empty;
+    root.querySelector('[data-act=send-backup]').disabled = empty;
   }
 
   async function showStorage() {
@@ -96,11 +99,8 @@ export function renderSettings(root, { state, reload, tabbar }) {
     e.target.value = '';
     if (!file) return;
     try {
-      const data = JSON.parse(await file.text());
-      if (data.app !== 'wardrobe' || !Array.isArray(data.items)) throw new Error('Not a wardrobe backup');
-      const items = await Promise.all(data.items.map(async (i) => ({ ...i, image: await dataUrlToBlob(i.image), thumb: await dataUrlToBlob(i.thumb) })));
-      const outfits = await Promise.all((data.outfits || []).map(async (o) => ({ ...o, thumb: await dataUrlToBlob(o.thumb) })));
-      const wishes = await Promise.all((data.wishes || []).map(async (w) => ({ ...w, image: await dataUrlToBlob(w.image), thumb: await dataUrlToBlob(w.thumb) })));
+      toast('Reading backup…', 4000);
+      const { items, outfits, wishes } = await readBackup(file);
       await db.putMany('items', items);
       await db.putMany('outfits', outfits);
       await db.putMany('wishes', wishes);
@@ -138,9 +138,14 @@ export function renderSettings(root, { state, reload, tabbar }) {
         toast('Download failed. Check the internet connection.');
       }
       b.disabled = false;
-    } else if (act === 'export') {
+    } else if (act === 'save-backup' || act === 'send-backup') {
       b.disabled = true;
-      try { await exportBackup(); } finally { b.disabled = false; showLastBackup(); }
+      try {
+        await (act === 'save-backup' ? saveOnPhone() : sendTo());
+      } catch (err) {
+        console.error(err);
+        alert('The backup could not be made. The phone may be short on memory or storage.');
+      } finally { b.disabled = false; showLastBackup(); }
     } else if (act === 'wipe') {
       if (!confirm('Delete ALL clothes, outfits and wishes from this phone? This cannot be undone.')) return;
       if (state.items.length && !confirm('Last check: do you have a backup? Tap OK to delete everything.')) return;
@@ -154,47 +159,50 @@ export function renderSettings(root, { state, reload, tabbar }) {
     }
   };
 
-  async function exportBackup() {
-    toast('Preparing backup…', 4000);
-    // Built in pieces so a big closet doesn't need one giant string in memory.
-    const parts = [`{"app":"wardrobe","version":1,"appVersion":"${VERSION}","exported":"${new Date().toISOString()}","items":[`];
-    for (const [k, i] of state.items.entries()) {
-      if (k) parts.push(',');
-      parts.push(JSON.stringify({ ...i, image: await blobToDataUrl(i.image), thumb: await blobToDataUrl(i.thumb) }));
-    }
-    parts.push('],"outfits":[');
-    for (const [k, o] of state.outfits.entries()) {
-      if (k) parts.push(',');
-      parts.push(JSON.stringify({ ...o, thumb: await blobToDataUrl(o.thumb) }));
-    }
-    parts.push('],"wishes":[');
-    for (const [k, w] of state.wishes.entries()) {
-      if (k) parts.push(',');
-      parts.push(JSON.stringify({ ...w, image: await blobToDataUrl(w.image), thumb: await blobToDataUrl(w.thumb) }));
-    }
-    parts.push(']}');
-    const name = `wardrobe-backup-${new Date().toISOString().slice(0, 10)}.json`;
-    const file = new File(parts, name, { type: 'application/json' });
-    const mark = () => { try { localStorage.setItem(LAST_BACKUP_KEY, String(Date.now())); } catch { /* ignore */ } };
+  // A zip made but not shared yet: the share menu may only open right after a tap,
+  // so if building the zip took too long, the next tap shares this one.
+  let readyZip = null;
 
-    if (navigator.canShare?.({ files: [file] })) {
-      try {
-        await navigator.share({ files: [file], title: 'Wardrobe backup' });
-        mark();
-        toast(`Backup saved (${(file.size / 1048576).toFixed(1)} MB)`);
-        return;
-      } catch (err) {
-        if (err.name === 'AbortError') return;
-      }
-    }
+  async function makeZip() {
+    if (readyZip) { const f = readyZip; readyZip = null; return f; }
+    toast('Preparing backup…', 6000);
+    return buildBackupZip(state);
+  }
+  const mark = () => { try { localStorage.setItem(LAST_BACKUP_KEY, String(Date.now())); } catch { /* ignore */ } };
+  const mb = (f) => `${(f.size / 1048576).toFixed(1)} MB`;
+
+  /** Saves the zip straight into the phone's Downloads folder. */
+  async function saveOnPhone() {
+    const file = await makeZip();
     const a = document.createElement('a');
     a.href = URL.createObjectURL(file);
-    a.download = name;
+    a.download = file.name;
     document.body.appendChild(a);
     a.click();
-    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 4000);
     mark();
-    toast(`Backup downloaded (${(file.size / 1048576).toFixed(1)} MB)`);
+    toast(`Saved in Downloads: ${file.name} (${mb(file)}). On Samsung: My Files → Downloads.`, 7000);
+  }
+
+  /** Opens the share menu (Google Drive, email, WhatsApp …) with the zip. */
+  async function sendTo() {
+    const file = await makeZip();
+    if (!navigator.canShare?.({ files: [file] })) {
+      readyZip = file;
+      await saveOnPhone();
+      return;
+    }
+    try {
+      await navigator.share({ files: [file], title: 'Wardrobe backup' });
+      mark();
+      toast(`Backup sent (${mb(file)})`);
+    } catch (err) {
+      if (err.name === 'AbortError') return;
+      if (err.name === 'NotAllowedError') { readyZip = file; toast('Backup ready. Tap “Send backup to…” again', 5000); return; }
+      console.warn('Share failed', err);
+      readyZip = file;
+      await saveOnPhone();
+    }
   }
 
   return () => { root.onclick = null; };

@@ -14,7 +14,7 @@ It is a small web app that installs on a phone (PWA), like Minja's Kitchen.
 - **Wishlist tab:** screenshots of things found online, each with a link to the shop. Tapping the picture opens the shop page. When adding one you crop the screenshot to the item and can remove the background. Name, price and category are optional. *I bought it* moves a wish into the Closet (keeping the shop link).
   - **Where the link comes from:** on **Samsung** phones, screenshots taken in a browser store the page address at the end of the file (the "Captured_App_Info" block the Gallery uses for its *go to source* button). The app reads it, so the link fills in by itself. Other phones' screenshots usually contain no address, so the app also offers: a link in the image's EXIF/XMP/PNG text, the **Paste** button (copy the link in the browser first: Share → Copy), and on Android, sharing the page from the browser straight to the installed app (Share → Wardrobe), which fills in the link and title.
 - **Settings tab:** backup and restore, storage protection, background-removal quality, install help.
-- **Backup:** Settings → *Save a backup* writes one `.json` file with every photo, piece and outfit. Save it off the phone (Google Drive, iCloud Drive, email). *Restore from a backup* reads it back, also on a new phone. The Settings tab shows a red dot when the last backup is more than 30 days old.
+- **Backup:** Settings → *Save backup on this phone* puts one `.zip` file in the phone's Downloads folder (Samsung: My Files → Downloads); *Send backup to…* opens the share menu for Google Drive, email etc. The zip holds the pictures as normal image files (`clothes/`, `outfits/`, `wishlist/`) plus `data.json` with everything else. *Restore from a backup* reads the zip, and also older `.json` backups. The Settings tab shows a red dot when the last backup is more than 30 days old.
 - **Version:** shown in small letters at the top of every screen. It goes up by 0.01 with every change (see `CLAUDE.md`).
 
 ## Photos and privacy
@@ -53,11 +53,13 @@ After a minute the app is at `https://rubenz21.github.io/M-cothing/`.
 | `js/wish.js` | Wishlist tab: list, add/edit (crop, background removal, link) |
 | `js/link.js` | Finding links in screenshot metadata or pasted text |
 | `js/share.js` | Outfit picture for sharing, and the share menu |
+| `js/backup.js` | Backup zip: build and restore (also old .json backups) |
 | `js/version.js` | App version shown at the top (bump with every commit) |
 | `js/bg.js` | Loads the background-removal library |
 | `js/db.js` | IndexedDB storage |
 | `js/images.js` | Resizing, trimming, colour detection |
 | `vendor/bg-removal.js` | `@imgly/background-removal` 1.7.0 with `onnxruntime-web` 1.21.0, bundled into one file with esbuild |
+| `vendor/fflate.js` | [fflate](https://github.com/101arrowz/fflate) 0.8.2 (MIT) for zip files, bundled with esbuild |
 | `sw.js` | Offline support: newest files when online, cached copy when offline; bump `CACHE` when releasing |
 | `manifest.webmanifest`, `icons/` | App name, colours and icons for installing |
 
