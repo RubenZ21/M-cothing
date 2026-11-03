@@ -83,6 +83,16 @@ export async function encodeTransparent(canvas) {
   return b.type === 'image/webp' ? b : canvasToBlob(canvas, 'image/png');
 }
 
+/** True when a real part of the picture is see-through (e.g. already cut out in the Gallery). */
+export function hasTransparency(src) {
+  const small = fitCanvas(src, 96);
+  const { data } = small.getContext('2d').getImageData(0, 0, small.width, small.height);
+  let clear = 0;
+  for (let i = 3; i < data.length; i += 4) if (data[i] < 128) clear++;
+  const share = clear / (data.length / 4);
+  return share > 0.03 && share < 0.97;
+}
+
 /** Most common colour of the visible pixels. */
 export function dominantColor(src) {
   const small = fitCanvas(src, 72);

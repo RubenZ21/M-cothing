@@ -4,7 +4,7 @@ import { uid } from './util.js';
 import { icon } from './icons.js';
 import { removeBackground } from './bg.js';
 import {
-  fileToCanvas, blobToCanvas, canvasToBlob, makeCanvas, trimAlpha, fitCanvas,
+  fileToCanvas, blobToCanvas, canvasToBlob, makeCanvas, trimAlpha, fitCanvas, hasTransparency,
   encodeTransparent, dominantColor, colorName
 } from './images.js';
 
@@ -21,6 +21,7 @@ export function renderAdd(root, file, { onSave, onCancel }) {
   let color = null;         // { hex, name }
   let removed = false;      // background removal succeeded
   let busy = true;
+  let preCut = false;      // the picture was already cut out (e.g. Samsung Gallery 'Save as image')
 
   root.className = 'app no-tabbar';
   root.innerHTML = `
@@ -31,7 +32,7 @@ export function renderAdd(root, file, { onSave, onCancel }) {
     </div>
     <div class="preview checker" id="pv">
       <canvas id="cv" role="img" aria-label="The photo of your piece"></canvas>
-      <span class="badge" id="badge" hidden>${icon('check')} Background removed</span>
+      <span class="badge" id="badge" hidden>${icon('check')} <span id="badge-text">Background removed</span></span>
       <div class="status" id="status"></div>
     </div>
     <div class="tools-row" id="view-tools" hidden>
@@ -41,6 +42,7 @@ export function renderAdd(root, file, { onSave, onCancel }) {
       </div>
       <button type="button" class="tool-btn" data-act="touch">${icon('brush')} Touch up</button>
     </div>
+    <p class="hint" id="fix-hint" hidden>Part of the clothing cut away? Tap <strong>Touch up</strong> → <strong>Restore</strong> and paint it back.</p>
     <div id="touch-tools" hidden>
       <div class="tools-row">
         <div class="segmented" role="group" aria-label="Brush">
@@ -101,6 +103,7 @@ export function renderAdd(root, file, { onSave, onCancel }) {
     root.querySelector('#view-tools').hidden = busy || painting || !mask;
     root.querySelector('#touch-tools').hidden = !painting;
     root.querySelector('#badge').hidden = busy || !removed || painting;
+    root.querySelector('#fix-hint').hidden = busy || !removed || painting || preCut;
     pv.classList.toggle('painting', painting);
     nameInput.placeholder = autoName();
     if (color) {
@@ -284,6 +287,19 @@ export function renderAdd(root, file, { onSave, onCancel }) {
     }
     cv.width = orig.width;
     cv.height = orig.height;
+    if (hasTransparency(orig)) {
+      // Already cut out: use it as it is, no second background removal.
+      preCut = true;
+      mask = orig;
+      removed = true;
+      view = 'cut';
+      busy = false;
+      root.querySelector('#badge-text').textContent = 'Already cut out';
+      detectColor();
+      draw();
+      refresh();
+      return;
+    }
     draw();
     process();
   })();

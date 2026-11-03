@@ -7,7 +7,7 @@ It is a small web app that installs on a phone (PWA), like Minja's Kitchen.
 
 ## What it does
 
-- **Clothes:** tap **+**, take a photo or pick one from the gallery. The background is removed on the phone itself, and you can touch up the edges with an erase/restore brush. Pick a category, seasons and (optionally) a name. The main colour is detected from the photo.
+- **Clothes:** tap **+**, take a photo or pick one from the gallery. The background is removed on the phone itself, and you can touch up the edges with an erase/restore brush. Pictures that are already cut out (for example Samsung Gallery: press and hold the item → *Save as image*) are used as they are. Pick a category, seasons and (optionally) a name. The main colour is detected from the photo.
 - **Closet:** clothes are grouped by type (Tops, Pants, Skirts, Dresses, Jackets, Shoes, Hats, Bags, Accessories), with search and filters.
 - **Outfit builder:** tap clothes to place them on a board. Drag to move, pinch to resize and rotate (or drag the round corner handle), and use Front / Back / Mirror / Remove.
 - **Outfits:** grouped by season, with the current season first. Outfits can be edited, renamed (tap the name at the top of the builder), duplicated and deleted.
@@ -22,7 +22,7 @@ It is a small web app that installs on a phone (PWA), like Minja's Kitchen.
 Everything stays on the phone, in the browser's IndexedDB storage. Nothing is uploaded and no account is needed.
 
 Background removal uses [@imgly/background-removal](https://github.com/imgly/background-removal-js), which runs in the browser.
-The first time it is used, the phone downloads the model once (about 40 MB, or about 80 MB for *Best quality* in Settings) from IMG.LY's CDN. After that it works offline.
+The first time it is used, the phone downloads the model once (about 80 MB for *Best quality*, the default; about 40 MB for *Fast* in Settings, which erases more of the clothes) from IMG.LY's CDN. After that it works offline.
 
 Because the photos only live on the phone:
 

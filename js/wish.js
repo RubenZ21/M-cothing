@@ -4,7 +4,7 @@ import { esc, uid, blobUrl, plural } from './util.js';
 import { icon } from './icons.js';
 import { removeBackground } from './bg.js';
 import {
-  fileToCanvas, blobToCanvas, canvasToBlob, makeCanvas, trimAlpha, fitCanvas, encodeTransparent
+  fileToCanvas, blobToCanvas, canvasToBlob, makeCanvas, trimAlpha, fitCanvas, encodeTransparent, hasTransparency
 } from './images.js';
 import { findUrl, normalizeUrl, siteName, inspectImage } from './link.js';
 
@@ -376,8 +376,9 @@ export function renderWishForm(root, { wish, file, shared, onSave, onDelete, onM
       updated: Date.now()
     };
     if (changed && work) {
-      const cut = !!mask && view === 'cut';
-      const final = cut ? trimAlpha(composite(), 6) : work;
+      const masked = !!mask && view === 'cut';
+      const cut = masked || hasTransparency(work); // keep see-through pictures see-through
+      const final = masked ? trimAlpha(composite(), 6) : cut ? trimAlpha(work, 6) : work;
       const full = fitCanvas(final, 1200);
       const thumbC = fitCanvas(final, 420);
       w.image = cut ? await encodeTransparent(full) : await canvasToBlob(full, 'image/jpeg', 0.88);

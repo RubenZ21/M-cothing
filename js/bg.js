@@ -12,7 +12,7 @@ export function getModel() {
     const m = localStorage.getItem(MODEL_KEY);
     if (m && MODELS[m]) return m;
   } catch { /* storage unavailable */ }
-  return 'isnet_quint8';
+  return 'isnet_fp16'; // the quantized 'Fast' model erases too much of the clothes too often
 }
 
 export function setModel(m) {
