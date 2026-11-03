@@ -189,9 +189,13 @@ h1, h2, h3 { font-family: var(--display); font-weight: 500; margin: 0; line-heig
 .frame { position: absolute; border: 1.5px dashed var(--accent-ink); border-radius: 6px; pointer-events: none; z-index: 900; }
 .handle { position: absolute; right: -16px; bottom: -16px; width: 32px; height: 32px; border-radius: 16px; background: var(--surface); border: 2px solid var(--accent-ink); pointer-events: auto; touch-action: none; box-shadow: 0 1px 4px rgba(0, 0, 0, .15); }
 .board-hint { position: absolute; inset: 0; margin: 0; display: grid; place-items: center; text-align: center; color: var(--muted); font-family: var(--display); font-style: italic; font-size: 24px; padding: 24px; pointer-events: none; }
-.sel-tools { position: absolute; left: 50%; bottom: 20px; transform: translateX(-50%); display: flex; gap: 2px; background: var(--fg); border-radius: 22px; padding: 4px; z-index: 950; }
-.sel-tools button { height: 40px; border: 0; background: none; color: #fff; font-size: 13px; font-weight: 500; padding: 0 10px; display: flex; align-items: center; gap: 5px; border-radius: 18px; }
-.sel-tools button:active { background: rgba(255, 255, 255, .12); }
+.tools-strip { flex: none; height: 56px; display: flex; align-items: center; justify-content: center; padding: 0 12px 8px; }
+.sel-tools { height: 48px; display: flex; align-items: center; gap: 2px; background: var(--surface); border: 1px solid var(--line); border-radius: 24px; padding: 4px; box-shadow: 0 1px 3px rgba(30, 28, 26, .06); }
+.sel-tools button { height: 40px; border: 0; background: none; color: var(--fg); font-size: 13px; font-weight: 500; padding: 0 10px; display: flex; align-items: center; gap: 5px; border-radius: 18px; }
+.sel-tools button:active { background: var(--accent-soft); }
+.sel-tools.empty { background: transparent; border-color: transparent; box-shadow: none; }
+.sel-tools.empty button, .sel-tools:not(.empty) .sel-hint { display: none; }
+.sel-hint { padding: 0 16px; font-size: 14px; color: var(--muted); }
 .sel-tools .icon { width: 17px; height: 17px; }
 .drawer { flex: none; height: min(36dvh, 290px); background: var(--surface); border-radius: 24px 24px 0 0; box-shadow: 0 -4px 16px rgba(30, 28, 26, .08); display: flex; flex-direction: column; padding-bottom: var(--safe-b); }
 .drawer .chips { padding: 14px 16px 10px; flex: none; }

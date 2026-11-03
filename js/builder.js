@@ -29,7 +29,11 @@ export function renderBuilder(root, { outfit, items, startItemId, onSave, onDele
           <p class="board-hint" id="hint">Tap clothes below to put them here</p>
           <div class="frame" id="frame" hidden><span class="handle" id="handle" aria-hidden="true"></span></div>
         </div>
-        <div class="sel-tools" id="tools" role="toolbar" aria-label="Selected piece" hidden>
+      </div>
+      <!-- Own row under the board, so it never covers clothes (e.g. shoes). -->
+      <div class="tools-strip">
+        <div class="sel-tools empty" id="tools" role="toolbar" aria-label="Selected piece">
+          <span class="sel-hint">Tap a piece to move it</span>
           <button type="button" data-act="front">${icon('front')} Front</button>
           <button type="button" data-act="backward">${icon('backLayer')} Back</button>
           <button type="button" data-act="mirror">${icon('mirror')} Mirror</button>
@@ -101,7 +105,7 @@ export function renderBuilder(root, { outfit, items, startItemId, onSave, onDele
     });
     const sel = pieces.find((p) => p.key === selKey);
     frame.hidden = !sel;
-    tools.hidden = !sel;
+    tools.classList.toggle('empty', !sel);
     if (sel) {
       const b = pieceBox(sel);
       Object.assign(frame.style, {
