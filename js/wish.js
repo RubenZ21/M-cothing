@@ -58,7 +58,7 @@ export function renderWishForm(root, { wish, file, shared, onSave, onDelete, onM
   let box = { x: 0.08, y: 0.12, w: 0.84, h: 0.6 }; // crop box, fractions of orig
   let busy = false;
   let changed = !wish;   // picture changed and must be re-encoded
-  let category = wish?.category || null;
+  let category = catById(wish?.category)?.legacy ? null : wish?.category || null;
 
   root.className = 'app no-tabbar';
   root.innerHTML = `

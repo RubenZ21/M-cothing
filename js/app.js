@@ -1,5 +1,5 @@
 import * as db from './db.js';
-import { CATEGORIES, SEASONS, catById, seasonsFromNow, currentSeason } from './constants.js';
+import { CATEGORIES, SEASONS, catById, categoriesFor, revealSelected, seasonsFromNow, currentSeason } from './constants.js';
 import { esc, toast, blobUrl, dropUrl, plural } from './util.js';
 import { icon } from './icons.js';
 import { colorName, blobToCanvas, fitCanvas, encodeTransparent, dominantColor } from './images.js';
@@ -7,6 +7,7 @@ import { renderWishlist, renderWishForm } from './wish.js';
 import { renderAdd } from './add.js';
 import { renderBuilder, renderOutfitThumb } from './builder.js';
 import { renderSettings, backupDue } from './settings.js';
+import { shareOutfit } from './share.js';
 import { VERSION } from './version.js';
 
 const app = document.getElementById('app');
@@ -63,22 +64,26 @@ function renderClothes() {
     if (!b) return;
     const act = b.dataset.act;
     if (act === 'add') pickPhoto('add');
-    else if (act === 'filter') { state.filter = b.dataset.id; updateClothes(); }
+    else if (act === 'filter') { state.filter = b.dataset.id; updateClothes(true); }
     else if (act === 'item') go(`item/${b.dataset.id}`);
   };
   updateClothes();
 }
 
-function updateClothes() {
+function updateClothes(smooth = false) {
   const q = state.query.trim().toLowerCase();
   const matches = (i) => !q || `${i.name} ${i.colorName} ${catById(i.category)?.label}`.toLowerCase().includes(q);
   const items = state.items.filter(matches);
-  const counts = Object.fromEntries(CATEGORIES.map((c) => [c.id, items.filter((i) => i.category === c.id).length]));
+  const cats = categoriesFor(state.items);
+  if (state.filter !== 'all' && !cats.some((c) => c.id === state.filter)) state.filter = 'all';
+  const counts = Object.fromEntries(cats.map((c) => [c.id, items.filter((i) => i.category === c.id).length]));
   app.querySelector('#count').textContent = plural(state.items.length, 'piece');
 
-  const chips = [{ id: 'all', label: 'All', n: items.length }, ...CATEGORIES.filter((c) => counts[c.id] || state.filter === c.id).map((c) => ({ ...c, n: counts[c.id] }))];
+  const chips = [{ id: 'all', label: 'All', n: items.length }, ...cats.filter((c) => counts[c.id] || state.filter === c.id).map((c) => ({ ...c, n: counts[c.id] }))];
   app.querySelector('#chips').innerHTML = chips.map((c) =>
     `<button type="button" class="chip" data-act="filter" data-id="${c.id}" aria-pressed="${state.filter === c.id}">${c.label}<span class="n">${c.n}</span></button>`).join('');
+  // The filter is remembered between tabs: keep its chip in view so it's clear what is shown.
+  revealSelected(app.querySelector('#chips'), smooth);
 
   const tile = (i) => `<button type="button" class="tile" data-act="item" data-id="${i.id}"><img src="${blobUrl(`t:${i.id}`, i.thumb)}" alt="${esc(i.name)}" loading="lazy"></button>`;
   const list = app.querySelector('#list');
@@ -93,7 +98,7 @@ function updateClothes() {
   if (!items.length) { list.innerHTML = `<div class="empty"><p>Nothing matches “${esc(state.query)}”.</p></div>`; return; }
 
   const sections = state.filter === 'all'
-    ? CATEGORIES.filter((c) => counts[c.id]).map((c) => ({ c, list: items.filter((i) => i.category === c.id), limit: 6 }))
+    ? cats.filter((c) => counts[c.id]).map((c) => ({ c, list: items.filter((i) => i.category === c.id), limit: 6 }))
     : [{ c: catById(state.filter), list: items.filter((i) => i.category === state.filter), limit: Infinity }];
   list.innerHTML = sections.map(({ c, list: l, limit }) => `
     <section class="section">
@@ -101,6 +106,7 @@ function updateClothes() {
         <h2>${c.label}<span class="count">${l.length}</span></h2>
         ${l.length > limit ? `<button type="button" class="link-btn" data-act="filter" data-id="${c.id}">See all</button>` : ''}
       </div>
+      ${c.legacy && l.length ? '<p class="legacy-note">“Accessories” is replaced by new categories (Scarves, Belts, Jewellery …). Open each piece and choose one; this group disappears when it is empty.</p>' : ''}
       ${l.length ? `<div class="grid">${l.slice(0, limit).map(tile).join('')}</div>` : '<p class="muted">Nothing here yet.</p>'}
     </section>`).join('');
 }
@@ -124,11 +130,14 @@ function renderOutfits() {
   const groups = seasonsFromNow().map((s) => ({ ...s, list: state.outfits.filter((o) => o.seasons?.includes(s.id)) }));
   const anytime = state.outfits.filter((o) => !o.seasons?.length);
   if (anytime.length) groups.push({ id: 'any', label: 'Any season', list: anytime });
-  const card = (o) => `<button type="button" class="ocard" data-act="open" data-id="${o.id}">
-      <span class="ocard-img"><img src="${blobUrl(`o:${o.id}`, o.thumb)}" alt="" loading="lazy"></span>
-      <span class="ocard-name">${esc(o.name)}</span>
-      <span class="ocard-meta">${plural(o.pieces.length, 'piece')}</span>
-    </button>`;
+  const card = (o) => `<div class="ocard">
+      <button type="button" class="ocard-open" data-act="open" data-id="${o.id}">
+        <span class="ocard-img"><img src="${blobUrl(`o:${o.id}`, o.thumb)}" alt="" loading="lazy"></span>
+        <span class="ocard-name">${esc(o.name)}</span>
+        <span class="ocard-meta">${plural(o.pieces.length, 'piece')}</span>
+      </button>
+      <button type="button" class="ocard-share" data-act="share" data-id="${o.id}" aria-label="Share ${esc(o.name)}">${icon('share')}</button>
+    </div>`;
   app.innerHTML = `
     <header class="page-head">
       <h1>Outfits</h1>
@@ -151,6 +160,14 @@ function renderOutfits() {
     if (!b) return;
     if (b.dataset.act === 'new') go('outfit/new');
     if (b.dataset.act === 'open') go(`outfit/${b.dataset.id}`);
+    if (b.dataset.act === 'share') {
+      const o = state.outfits.find((x) => x.id === b.dataset.id);
+      if (!o) return;
+      shareOutfit(o, itemMap()).then((r) => {
+        if (r === 'downloaded') toast('Picture saved to your downloads');
+        else if (r === 'again') toast('Picture ready. Tap share again');
+      });
+    }
   };
 }
 
@@ -176,6 +193,7 @@ function renderItem(id) {
         <div class="chips wrap" role="group" aria-labelledby="cat-label">
           ${CATEGORIES.map((c) => `<button type="button" class="chip" data-act="cat" data-id="${c.id}" aria-pressed="${c.id === item.category}">${c.label}</button>`).join('')}
         </div>
+        ${catById(item.category)?.legacy ? '<p class="legacy-note" id="legacy-note">This piece is still in the old “Accessories” group. Pick one of the categories above.</p>' : ''}
       </div>
       <div>
         <div class="field-label"><span id="season-label">Seasons</span></div>
@@ -219,6 +237,7 @@ function renderItem(id) {
       item.category = b.dataset.id;
       app.querySelectorAll('[data-act=cat]').forEach((x) => x.setAttribute('aria-pressed', String(x.dataset.id === item.category)));
       app.querySelector('.topbar h1').textContent = catById(item.category).label;
+      app.querySelector('#legacy-note')?.remove();
       persist();
     } else if (act === 'season') {
       const s = b.dataset.id;

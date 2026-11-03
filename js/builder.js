@@ -1,7 +1,8 @@
 // Outfit builder: a 3:4 board where pieces are moved (drag), resized and
 // rotated (pinch, or the corner handle), layered and mirrored.
-import { CATEGORIES, SEASONS, PLACEMENT, currentSeason } from './constants.js';
-import { esc, uid, blobUrl } from './util.js';
+import { SEASONS, PLACEMENT, currentSeason, categoriesFor, revealSelected } from './constants.js';
+import { esc, uid, blobUrl, toast } from './util.js';
+import { shareOutfit } from './share.js';
 import { icon } from './icons.js';
 import { makeCanvas, blobToImage, encodeTransparent } from './images.js';
 
@@ -13,7 +14,7 @@ export function renderBuilder(root, { outfit, items, startItemId, onSave, onDele
   let selKey = null;
   let dirty = false;
   let outfitName = outfit?.name || '';
-  const cats = CATEGORIES.filter((c) => items.some((i) => i.category === c.id));
+  const cats = categoriesFor(items).filter((c) => items.some((i) => i.category === c.id));
   let tab = cats[0]?.id;
 
   root.className = 'app no-tabbar builder-host';
@@ -22,7 +23,10 @@ export function renderBuilder(root, { outfit, items, startItemId, onSave, onDele
       <div class="topbar">
         <button type="button" class="icon-btn" data-act="back" aria-label="Back">${icon('back')}</button>
         <h1><button type="button" class="title-btn" data-act="rename"><span class="visually-hidden">Rename outfit: </span><span id="title">${esc(outfitName || 'New outfit')}</span>${icon('pencil')}</button></h1>
-        <button type="button" class="btn-small right" data-act="save">Save</button>
+        <div class="right top-actions">
+          <button type="button" class="icon-btn" data-act="share" aria-label="Share outfit">${icon('share')}</button>
+          <button type="button" class="btn-small" data-act="save">Save</button>
+        </div>
       </div>
       <div class="board-wrap" id="bw">
         <div class="board" id="board" aria-label="Outfit board">
@@ -116,10 +120,11 @@ export function renderBuilder(root, { outfit, items, startItemId, onSave, onDele
     hint.hidden = pieces.length > 0;
   }
 
-  function renderDrawer() {
+  function renderDrawer(smooth = false) {
     if (!cats.length) return;
     root.querySelector('#tabs').innerHTML = cats.map((c) =>
       `<button type="button" class="chip" role="tab" data-act="tab" data-id="${c.id}" aria-selected="${c.id === tab}">${c.label}</button>`).join('');
+    revealSelected(root.querySelector('#tabs'), smooth);
     const used = new Set(pieces.map((p) => p.itemId));
     root.querySelector('#dgrid').innerHTML = items.filter((i) => i.category === tab).map((i) =>
       `<button type="button" class="dtile${used.has(i.id) ? ' used' : ''}" data-act="add" data-id="${i.id}" aria-label="${esc(i.name)}${used.has(i.id) ? ' (in outfit)' : ''}">
@@ -271,7 +276,7 @@ export function renderBuilder(root, { outfit, items, startItemId, onSave, onDele
   });
 
   // ---- actions ----
-  root.onclick = (e) => {
+  root.onclick = async (e) => {
     const b = e.target.closest('[data-act]');
     if (!b) return;
     const act = b.dataset.act;
@@ -280,8 +285,15 @@ export function renderBuilder(root, { outfit, items, startItemId, onSave, onDele
       if (dirty && !confirm('Leave without saving this outfit?')) return;
       onClose();
     } else if (act === 'save') openSaveSheet();
+    else if (act === 'share') {
+      if (!pieces.length) { alert('Add some clothes to the outfit first.'); return; }
+      const name = outfitName || 'My outfit';
+      const result = await shareOutfit({ name, seasons: outfit?.seasons || [], pieces: pieces.map(({ key, ...p }) => p) }, itemMap);
+      if (result === 'downloaded') toast('Picture saved to your downloads');
+      else if (result === 'again') toast('Picture ready. Tap share again');
+    }
     else if (act === 'rename') openRenameSheet();
-    else if (act === 'tab') { tab = b.dataset.id; renderDrawer(); }
+    else if (act === 'tab') { tab = b.dataset.id; renderDrawer(true); }
     else if (act === 'add') addPiece(b.dataset.id);
     else if (i >= 0 && act === 'front') { pieces.push(...pieces.splice(i, 1)); dirty = true; layout(); }
     else if (i >= 0 && act === 'backward') { pieces.unshift(...pieces.splice(i, 1)); dirty = true; layout(); }
@@ -405,8 +417,14 @@ export async function renderOutfitThumb(outfit, itemMap, width = 600) {
   const W = width, H = width * ASPECT;
   const c = makeCanvas(W, H);
   const ctx = c.getContext('2d');
+  await drawOutfit(ctx, outfit.pieces, itemMap, W, H);
+  return encodeTransparent(c);
+}
+
+/** Draws the pieces into a W x H area (3:4) of a canvas context. */
+export async function drawOutfit(ctx, pieces, itemMap, W, H) {
   ctx.imageSmoothingQuality = 'high';
-  for (const p of outfit.pieces) {
+  for (const p of pieces) {
     const it = itemMap.get(p.itemId);
     if (!it) continue;
     const img = await blobToImage(it.image);
@@ -418,5 +436,4 @@ export async function renderOutfitThumb(outfit, itemMap, width = 600) {
     ctx.drawImage(img, -w / 2, -h / 2, w, h);
     ctx.restore();
   }
-  return encodeTransparent(c);
 }
