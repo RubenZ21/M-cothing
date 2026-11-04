@@ -1,6 +1,6 @@
 // Offline support. Online, the app always loads the newest files; the cache is
 // only used when the network is unavailable. Bump CACHE with every release.
-const CACHE = 'wardrobe-1.09'; // keep in step with js/version.js
+const CACHE = 'wardrobe-1.10'; // keep in step with js/version.js
 const SHELL = [
   './', 'index.html', 'styles.css', 'manifest.webmanifest',
   'js/app.js', 'js/add.js', 'js/bg.js', 'js/builder.js', 'js/constants.js', 'js/db.js',
@@ -18,7 +18,8 @@ self.addEventListener('install', (e) => {
 self.addEventListener('activate', (e) => {
   e.waitUntil(
     caches.keys()
-      .then((keys) => Promise.all(keys.filter((k) => k !== CACHE && k !== SHARE_CACHE).map((k) => caches.delete(k))))
+      // Only our own old caches: other apps on this site (e.g. the interior app) keep theirs.
+      .then((keys) => Promise.all(keys.filter((k) => k.startsWith('wardrobe-') && k !== CACHE && k !== SHARE_CACHE).map((k) => caches.delete(k))))
       .then(() => self.clients.claim())
   );
 });
