@@ -8,12 +8,14 @@ import { renderAdd } from './add.js';
 import { renderBuilder, renderOutfitThumb } from './builder.js';
 import { renderSettings, backupDue } from './settings.js';
 import { shareOutfit } from './share.js';
-import { renderPalette, emptyPalette, paletteMatch, matchText, colourCount } from './palette.js';
+import {
+  renderPalette, emptyPalette, paletteMatch, matchMark, matchLine, colourCount, inPalette, checkFilter, paletteToggleHtml, paletteCatsHtml
+} from './palette.js';
 import { VERSION } from './version.js';
 
 const app = document.getElementById('app');
 const fileInput = document.getElementById('file-input');
-const state = { items: [], outfits: [], wishes: [], palette: null, filter: 'all', query: '', paletteOnly: false, wishPaletteOnly: false };
+const state = { items: [], outfits: [], wishes: [], palette: null, filter: 'all', query: '', palFilter: null, wishPalFilter: null }; // palFilter: null (off), 'all' or a palette category id
 let cleanup = null;
 let pendingFile = null;
 let pendingTarget = 'add'; // which screen the chosen photo goes to: 'add' (closet) or 'wish/new'
@@ -57,6 +59,7 @@ function renderClothes() {
       <input id="q" type="search" placeholder="Search by name or colour" value="${esc(state.query)}" autocomplete="off">
     </div>
     <div class="chips scroll-x" id="chips"></div>
+    <div id="pal-cats"></div>
     <div id="list"></div>
     <button type="button" class="fab" data-act="add" aria-label="Add a piece">${icon('plus')}</button>
     ${tabbar('clothes')}`;
@@ -68,7 +71,8 @@ function renderClothes() {
     const act = b.dataset.act;
     if (act === 'add') pickPhoto('add');
     else if (act === 'filter') { state.filter = b.dataset.id; updateClothes(true); }
-    else if (act === 'pal-filter') { state.paletteOnly = !state.paletteOnly; updateClothes(); }
+    else if (act === 'pal-filter') { state.palFilter = state.palFilter ? null : 'all'; updateClothes(); }
+    else if (act === 'pal-cat') { state.palFilter = b.dataset.id; updateClothes(); }
     else if (act === 'item') go(`item/${b.dataset.id}`);
   };
   updateClothes();
@@ -78,29 +82,24 @@ function updateClothes(smooth = false) {
   const q = state.query.trim().toLowerCase();
   const matches = (i) => !q || `${i.name} ${i.colorName} ${catById(i.category)?.label}`.toLowerCase().includes(q);
   const usePalette = colourCount(state.palette) > 0;
-  if (!usePalette) state.paletteOnly = false;
+  state.palFilter = usePalette ? checkFilter(state.palette, state.palFilter) : null;
   const match = new Map(usePalette ? state.items.map((i) => [i.id, paletteMatch(state.palette, i.color)]) : []);
-  const items = state.items.filter((i) => matches(i) && (!state.paletteOnly || match.get(i.id)?.kind === 'good'));
+  const items = state.items.filter((i) => matches(i) && (!state.palFilter || inPalette(state.palette, i.color, state.palFilter)));
   const cats = categoriesFor(state.items);
   if (state.filter !== 'all' && !cats.some((c) => c.id === state.filter)) state.filter = 'all';
   const counts = Object.fromEntries(cats.map((c) => [c.id, items.filter((i) => i.category === c.id).length]));
   app.querySelector('#count').textContent = plural(state.items.length, 'piece');
 
   const chips = [{ id: 'all', label: 'All', n: items.length }, ...cats.filter((c) => counts[c.id] || state.filter === c.id).map((c) => ({ ...c, n: counts[c.id] }))];
-  app.querySelector('#chips').innerHTML = (usePalette
-    ? `<button type="button" class="chip pal-toggle" data-act="pal-filter" aria-pressed="${state.paletteOnly}">${icon('palette')} In my palette</button>` : '')
+  app.querySelector('#pal-cats').innerHTML = usePalette ? paletteCatsHtml(state.palette, state.palFilter) : '';
+  revealSelected(app.querySelector('.pal-cats'), false, '[aria-pressed=true]');
+  app.querySelector('#chips').innerHTML = (usePalette ? paletteToggleHtml(state.palFilter) : '')
     + chips.map((c) =>
     `<button type="button" class="chip" data-act="filter" data-id="${c.id}" aria-pressed="${state.filter === c.id}">${c.label}<span class="n">${c.n}</span></button>`).join('');
   // The filter is remembered between tabs: keep its chip in view so it's clear what is shown.
   revealSelected(app.querySelector('#chips'), smooth, '[data-act=filter][aria-pressed=true]');
 
-  const mark = (i) => {
-    const m = match.get(i.id);
-    if (!m) return '';
-    return m.kind === 'good'
-      ? `<span class="pal-mark good" title="In your palette: ${esc(matchText(m))}">${icon('check')}</span>`
-      : `<span class="pal-mark avoid" title="Close to a colour to avoid: ${esc(matchText(m))}">${icon('alert')}</span>`;
-  };
+  const mark = (i) => matchMark(match.get(i.id));
   const label = (i) => {
     const m = match.get(i.id);
     return esc(i.name) + (m ? (m.kind === 'good' ? ', in your palette' : ', close to a colour to avoid') : '');
@@ -116,7 +115,7 @@ function updateClothes(smooth = false) {
     return;
   }
   if (!items.length) {
-    list.innerHTML = state.paletteOnly
+    list.innerHTML = state.palFilter
       ? '<div class="empty"><p>No pieces close to your palette colours here.</p></div>'
       : `<div class="empty"><p>Nothing matches “${esc(state.query)}”.</p></div>`;
     return;
@@ -253,7 +252,7 @@ function renderItem(id) {
     el.hidden = !m;
     if (!m) return;
     el.className = `pal-line ${m.kind}`;
-    el.innerHTML = `<span class="pal-chip small" style="background:${esc(m.color.hex)}"></span>${m.kind === 'good' ? 'In your palette: close to' : 'Close to a colour to avoid:'} ${esc(matchText(m))}`;
+    el.innerHTML = matchLine(m);
   };
   showPal();
   app.querySelector('#color-input').addEventListener('input', (e) => {
@@ -402,8 +401,8 @@ async function route() {
         wishes: state.wishes,
         tabbar: tabbar('wishlist'),
         palette: state.palette,
-        paletteOnly: state.wishPaletteOnly,
-        onTogglePalette: () => { state.wishPaletteOnly = !state.wishPaletteOnly; route(); },
+        palFilter: state.wishPalFilter,
+        onPalFilter: (v) => { state.wishPalFilter = v; route(); },
         onAdd: () => pickPhoto('wish/new'),
         onEdit: (wid) => go(`wish/${wid}`)
       });

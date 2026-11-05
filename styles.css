@@ -347,3 +347,12 @@ dialog.viewer::backdrop { background: #1f1c1d; }
 .pal-found-chip[aria-pressed=false] { opacity: .25; }
 .pal-found-chip[aria-pressed=false] .icon { display: none; }
 .wcard-img .pal-mark { right: 8px; top: 8px; }
+
+/* palette categories */
+#add-card { cursor: pointer; }
+.pal-group .pal-cards { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.pal-group .pal-card { padding: 0; }
+.pal-card-img { border-radius: 12px; overflow: hidden; }
+.pal-sheet-card { width: 100%; max-height: 28dvh; object-fit: contain; border-radius: 14px; background: var(--tile); }
+.pal-cats { padding: 2px 16px 4px; }
+.pal-cats .chip { height: 34px; font-size: 13px; }

@@ -7,15 +7,18 @@ import {
   fileToCanvas, blobToCanvas, canvasToBlob, makeCanvas, trimAlpha, fitCanvas, encodeTransparent, hasTransparency,
   pieceColour, colorName
 } from './images.js';
-import { paletteMatch, matchMark, matchLine, colourCount } from './palette.js';
+import {
+  paletteMatch, matchMark, matchLine, colourCount, inPalette, checkFilter, paletteToggleHtml, paletteCatsHtml
+} from './palette.js';
 import { findUrl, normalizeUrl, siteName, inspectImage } from './link.js';
 
 // ---------------- List ----------------
-export function renderWishlist(root, { wishes, tabbar, onAdd, onEdit, palette, paletteOnly = false, onTogglePalette }) {
+export function renderWishlist(root, { wishes, tabbar, onAdd, onEdit, palette, palFilter = null, onPalFilter }) {
   root.className = 'app';
   const usePalette = colourCount(palette) > 0;
   const match = new Map(usePalette ? wishes.map((w) => [w.id, paletteMatch(palette, w.color)]) : []);
-  const shown = usePalette && paletteOnly ? wishes.filter((w) => match.get(w.id)?.kind === 'good') : wishes;
+  const which = usePalette ? checkFilter(palette, palFilter) : null;
+  const shown = which ? wishes.filter((w) => inPalette(palette, w.color, which)) : wishes;
   const card = (w) => {
     const img = `<img src="${blobUrl(`w:${w.id}`, w.thumb)}" alt="" loading="lazy">`;
     const meta = [w.site !== w.name && w.site, w.price].filter(Boolean).map(esc).join(' · ');
@@ -41,7 +44,7 @@ export function renderWishlist(root, { wishes, tabbar, onAdd, onEdit, palette, p
       <h1>Wishlist</h1>
       <div class="head-actions"><span>${plural(wishes.length, 'wish', 'wishes')}</span></div>
     </header>
-    ${usePalette && wishes.length ? `<div class="chips"><button type="button" class="chip pal-toggle" data-act="pal-filter" aria-pressed="${paletteOnly}">${icon('palette')} In my palette</button></div>` : ''}
+    ${usePalette && wishes.length ? `<div class="chips">${paletteToggleHtml(which)}</div>${paletteCatsHtml(palette, which)}` : ''}
     ${shown.length ? `<div class="wgrid">${shown.map(card).join('')}</div>` : wishes.length ? '<div class="empty"><p>No wishes close to your palette colours yet.</p></div>' : `<div class="empty">
       <h2>Nothing on the wishlist yet</h2>
       <p>Found something you love online? Take a screenshot, then tap <strong>+</strong> and choose it.</p>
@@ -54,7 +57,8 @@ export function renderWishlist(root, { wishes, tabbar, onAdd, onEdit, palette, p
     if (!b) return;
     if (b.dataset.act === 'add') onAdd();
     if (b.dataset.act === 'edit') onEdit(b.dataset.id);
-    if (b.dataset.act === 'pal-filter') onTogglePalette();
+    if (b.dataset.act === 'pal-filter') onPalFilter(which ? null : 'all');
+    if (b.dataset.act === 'pal-cat') onPalFilter(b.dataset.id);
   };
   return () => { root.onclick = null; };
 }
