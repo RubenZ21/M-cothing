@@ -1,6 +1,6 @@
 // "New piece" screen: photo -> background removed -> optional touch up -> details -> save.
 import { CATEGORIES, SEASONS, catById } from './constants.js';
-import { uid } from './util.js';
+import { uid, esc } from './util.js';
 import { icon } from './icons.js';
 import { removeBackground } from './bg.js';
 import {
@@ -61,7 +61,7 @@ export function renderAdd(root, file, { onSave, onCancel }) {
       <div>
         <div class="field-label"><span id="cat-label">Category</span></div>
         <div class="chips wrap" id="cats" role="group" aria-labelledby="cat-label">
-          ${CATEGORIES.map((c) => `<button type="button" class="chip" data-act="cat" data-id="${c.id}" aria-pressed="false">${c.label}</button>`).join('')}
+          ${CATEGORIES.map((c) => `<button type="button" class="chip" data-act="cat" data-id="${c.id}" aria-pressed="false">${esc(c.label)}</button>`).join('')}
         </div>
       </div>
       <div>
@@ -113,7 +113,7 @@ export function renderAdd(root, file, { onSave, onCancel }) {
     }
     const c = catById(category);
     saveBtn.disabled = busy || !category;
-    saveBtn.textContent = busy ? 'Please wait…' : c ? `Save to ${c.label}` : 'Pick a category';
+    saveBtn.textContent = busy ? 'Please wait…' : c ? `Save to ${esc(c.label)}` : 'Pick a category';
   }
 
   function draw() {

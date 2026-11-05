@@ -1,5 +1,6 @@
 import * as db from './db.js';
-import { CATEGORIES, SEASONS, catById, categoriesFor, revealSelected, seasonsFromNow, currentSeason } from './constants.js';
+import { CATEGORIES, SEASONS, catById, categoriesFor, revealSelected, seasonsFromNow, currentSeason, setCategories } from './constants.js';
+import { renderCategoryEditor } from './categories.js';
 import { esc, toast, blobUrl, dropUrl, plural } from './util.js';
 import { icon } from './icons.js';
 import { colorName, blobToCanvas, fitCanvas, encodeTransparent, dominantColor, pieceColour } from './images.js';
@@ -21,7 +22,9 @@ let pendingFile = null;
 let pendingTarget = 'add'; // which screen the chosen photo goes to: 'add' (closet) or 'wish/new'
 
 async function reload() {
-  const [items, outfits, wishes, palette] = await Promise.all([db.all('items'), db.all('outfits'), db.all('wishes'), db.get('palette', 'main')]);
+  const [items, outfits, wishes, palette, cats] = await Promise.all([db.all('items'), db.all('outfits'), db.all('wishes'), db.get('palette', 'main'), db.get('meta', 'categories')]);
+  setCategories(cats?.list); // her own category list, or the defaults
+  state.categories = cats?.list || null; // only her own list goes into the backup
   state.palette = palette || emptyPalette();
   state.items = items.sort((a, b) => b.created - a.created);
   state.wishes = wishes.sort((a, b) => b.created - a.created);
@@ -51,6 +54,7 @@ function renderClothes() {
       <h1>Closet</h1>
       <div class="head-actions">
         <span id="count"></span>
+        <button type="button" class="icon-btn" data-act="edit-cats" aria-label="Edit categories">${icon('pencil')}</button>
       </div>
     </header>
     <div class="search">
@@ -71,6 +75,7 @@ function renderClothes() {
     const act = b.dataset.act;
     if (act === 'add') pickPhoto('add');
     else if (act === 'filter') { state.filter = b.dataset.id; updateClothes(true); }
+    else if (act === 'edit-cats') go('categories');
     else if (act === 'pal-filter') { state.palFilter = state.palFilter ? null : 'all'; updateClothes(); }
     else if (act === 'pal-cat') { state.palFilter = b.dataset.id; updateClothes(); }
     else if (act === 'item') go(`item/${b.dataset.id}`);
@@ -95,7 +100,7 @@ function updateClothes(smooth = false) {
   revealSelected(app.querySelector('.pal-cats'), false, '[aria-pressed=true]');
   app.querySelector('#chips').innerHTML = (usePalette ? paletteToggleHtml(state.palFilter) : '')
     + chips.map((c) =>
-    `<button type="button" class="chip" data-act="filter" data-id="${c.id}" aria-pressed="${state.filter === c.id}">${c.label}<span class="n">${c.n}</span></button>`).join('');
+    `<button type="button" class="chip" data-act="filter" data-id="${c.id}" aria-pressed="${state.filter === c.id}">${esc(c.label)}<span class="n">${c.n}</span></button>`).join('');
   // The filter is remembered between tabs: keep its chip in view so it's clear what is shown.
   revealSelected(app.querySelector('#chips'), smooth, '[data-act=filter][aria-pressed=true]');
 
@@ -127,10 +132,10 @@ function updateClothes(smooth = false) {
   list.innerHTML = sections.map(({ c, list: l, limit }) => `
     <section class="section">
       <div class="section-head">
-        <h2>${c.label}<span class="count">${l.length}</span></h2>
+        <h2>${esc(c.label)}<span class="count">${l.length}</span></h2>
         ${l.length > limit ? `<button type="button" class="link-btn" data-act="filter" data-id="${c.id}">See all</button>` : ''}
       </div>
-      ${c.legacy && l.length ? '<p class="legacy-note">“Accessories” is replaced by new categories (Scarves, Belts, Jewellery …). Open each piece and choose one; this group disappears when it is empty.</p>' : ''}
+      ${c.legacy && l.length ? `<p class="legacy-note">“${esc(c.label)}” is no longer one of your categories. Open each piece and choose another one; this group disappears when it is empty.</p>` : ''}
       ${l.length ? `<div class="grid">${l.slice(0, limit).map(tile).join('')}</div>` : '<p class="muted">Nothing here yet.</p>'}
     </section>`).join('');
 }
@@ -215,9 +220,9 @@ function renderItem(id) {
       <div>
         <div class="field-label"><span id="cat-label">Category</span></div>
         <div class="chips wrap" role="group" aria-labelledby="cat-label">
-          ${CATEGORIES.map((c) => `<button type="button" class="chip" data-act="cat" data-id="${c.id}" aria-pressed="${c.id === item.category}">${c.label}</button>`).join('')}
+          ${CATEGORIES.map((c) => `<button type="button" class="chip" data-act="cat" data-id="${c.id}" aria-pressed="${c.id === item.category}">${esc(c.label)}</button>`).join('')}
         </div>
-        ${catById(item.category)?.legacy ? '<p class="legacy-note" id="legacy-note">This piece is still in the old “Accessories” group. Pick one of the categories above.</p>' : ''}
+        ${catById(item.category)?.legacy ? `<p class="legacy-note" id="legacy-note">This piece is in “${esc(catById(item.category).label)}”, which is no longer one of your categories. Pick one above.</p>` : ''}
       </div>
       <div>
         <div class="field-label"><span id="season-label">Seasons</span></div>
@@ -372,6 +377,13 @@ async function route() {
         palette: state.palette,
         tabbar: tabbar('palette'),
         save: async (p) => { await db.put('palette', p); state.palette = p; }
+      });
+      break;
+    case 'categories':
+      cleanup = renderCategoryEditor(app, {
+        state,
+        onBack: () => (history.length > 1 ? history.back() : go('clothes')),
+        save: async (list) => { await db.put('meta', { id: 'categories', list }); setCategories(list); state.categories = list; }
       });
       break;
     case 'settings':

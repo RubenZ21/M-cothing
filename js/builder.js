@@ -123,7 +123,7 @@ export function renderBuilder(root, { outfit, items, startItemId, onSave, onDele
   function renderDrawer(smooth = false) {
     if (!cats.length) return;
     root.querySelector('#tabs').innerHTML = cats.map((c) =>
-      `<button type="button" class="chip" role="tab" data-act="tab" data-id="${c.id}" aria-selected="${c.id === tab}">${c.label}</button>`).join('');
+      `<button type="button" class="chip" role="tab" data-act="tab" data-id="${c.id}" aria-selected="${c.id === tab}">${esc(c.label)}</button>`).join('');
     revealSelected(root.querySelector('#tabs'), smooth);
     const used = new Set(pieces.map((p) => p.itemId));
     root.querySelector('#dgrid').innerHTML = items.filter((i) => i.category === tab).map((i) =>

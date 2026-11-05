@@ -52,7 +52,7 @@ export async function buildBackupZip(state) {
     }
     palette = { ...state.palette, photos };
   }
-  const data = { app: 'wardrobe', version: 2, appVersion: VERSION, exported: new Date().toISOString(), items, outfits, wishes, palette };
+  const data = { app: 'wardrobe', version: 2, appVersion: VERSION, exported: new Date().toISOString(), items, outfits, wishes, palette, categories: state.categories || null };
   files['data.json'] = [strToU8(JSON.stringify(data, null, 1)), { level: 6 }];
   files['README.txt'] = [strToU8(
     `Minja's Wardrobe backup (app version ${VERSION}, ${new Date().toLocaleString()})\r\n\r\n`
@@ -87,7 +87,8 @@ export async function readBackup(file) {
     items: (data.items || []).map((i) => ({ ...i, image: pic(i.image), thumb: pic(i.thumb) })),
     outfits: (data.outfits || []).map((o) => ({ ...o, thumb: pic(o.thumb) })),
     wishes: (data.wishes || []).map((w) => ({ ...w, image: pic(w.image), thumb: pic(w.thumb) })),
-    palette: data.palette ? { ...data.palette, photos: (data.palette.photos || []).map((p) => ({ ...p, image: pic(p.image), thumb: pic(p.thumb) })) } : null
+    palette: data.palette ? { ...data.palette, photos: (data.palette.photos || []).map((p) => ({ ...p, image: pic(p.image), thumb: pic(p.thumb) })) } : null,
+    categories: Array.isArray(data.categories) ? data.categories : null
   };
 }
 

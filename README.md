@@ -8,7 +8,8 @@ It is a small web app that installs on a phone (PWA), like Minja's Kitchen.
 ## What it does
 
 - **Clothes:** tap **+**, take a photo or pick one from the gallery. The background is removed on the phone itself, and you can touch up the edges with an erase/restore brush. Pictures that are already cut out (for example Samsung Gallery: press and hold the item → *Save as image*) are used as they are. Pick a category, seasons and (optionally) a name. The main colour is detected from the photo.
-- **Closet:** clothes are grouped by type (Tops, Blouses, Pants, Skirts, Dresses, Jackets, Blazers, Cardigans, Kimonos & Open Vests, Shoes, Hats, Bags, Scarves, Belts, Gloves, Jewellery, Watches, Brooches, Eyewear), with search and filters. The chosen filter is remembered between tabs and its button is always scrolled into view. Pieces saved under the old *Accessories* category stay in an *Accessories* group, with a note, until each one is given a new category.
+- **Closet:** clothes are grouped by type (Tops, Blouses, Pants, Skirts, Dresses, Jackets, Blazers, Cardigans, Open-front Cardigans, Kimonos, Open Vests, Shoes, Hats, Bags, Scarves, Belts, Gloves, Jewellery, Watches, Brooches, Eyewear), with search and filters. The chosen filter is remembered between tabs and its button is always scrolled into view. Pieces saved under the old *Accessories* category stay in an *Accessories* group, with a note, until each one is given a new category.
+- **Edit categories** (pencil in the Clothes tab, or Settings): rename, add, reorder and remove clothing categories; a category can only be removed when no clothes or wishes are in it. *Back to the original list* restores the defaults (keeping her own categories that have pieces). Her list is saved on the phone and in the backup.
 - **Outfit builder:** tap clothes to place them on a board. Drag to move, pinch to resize and rotate (or drag the round corner handle), and use Front / Back / Mirror / Remove.
 - **Outfits:** grouped by season, with the current season first. Outfits can be edited, renamed (tap the name at the top of the builder), duplicated and deleted. The share button (on each outfit card and in the builder) sends a picture of the outfit with its name and seasons through the phone's share menu (WhatsApp, Messages, email …).
 - **Wishlist tab:** screenshots of things found online, each with a link to the shop. Tapping the picture opens the shop page. When adding one you crop the screenshot to the item and can remove the background. Name, price and category are optional. *I bought it* moves a wish into the Closet (keeping the shop link).
@@ -57,6 +58,7 @@ After a minute the app is at `https://rubenz21.github.io/M-cothing/`.
 | `js/share.js` | Outfit picture for sharing, and the share menu |
 | `js/backup.js` | Backup zip: build and restore (also old .json backups) |
 | `js/palette.js` | Palette tab, picking colours from photos, matching clothes to the palette |
+| `js/categories.js` | Edit categories screen |
 | `js/version.js` | App version shown at the top (bump with every commit) |
 | `js/bg.js` | Loads the background-removal library |
 | `js/db.js` | IndexedDB storage |

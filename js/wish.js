@@ -139,7 +139,7 @@ export function renderWishForm(root, { wish, file, shared, palette, onSave, onDe
       <div>
         <div class="field-label"><span id="wcat-label">Category</span><small>Optional</small></div>
         <div class="chips wrap" role="group" aria-labelledby="wcat-label">
-          ${CATEGORIES.map((c) => `<button type="button" class="chip" data-act="cat" data-id="${c.id}" aria-pressed="false">${c.label}</button>`).join('')}
+          ${CATEGORIES.map((c) => `<button type="button" class="chip" data-act="cat" data-id="${c.id}" aria-pressed="false">${esc(c.label)}</button>`).join('')}
         </div>
       </div>
       ${wish ? `

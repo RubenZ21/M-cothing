@@ -57,6 +57,12 @@ export function renderSettings(root, { state, reload, tabbar }) {
       </section>
 
       <section class="card">
+        <h2>Clothing categories</h2>
+        <p class="muted">Rename, add, remove or reorder the categories (Tops, Blouses, Jackets …).</p>
+        <a class="btn-secondary" href="#/categories">${icon('pencil')} Edit categories</a>
+      </section>
+
+      <section class="card">
         <h2>Start over</h2>
         <button type="button" class="btn-secondary danger" data-act="wipe">${icon('trash')} Delete everything (clothes, outfits, wishes, palette)</button>
       </section>
@@ -100,8 +106,9 @@ export function renderSettings(root, { state, reload, tabbar }) {
     if (!file) return;
     try {
       toast('Reading backup…', 4000);
-      const { items, outfits, wishes, palette } = await readBackup(file);
+      const { items, outfits, wishes, palette, categories } = await readBackup(file);
       if (palette) await db.put('palette', palette);
+      if (categories?.length) await db.put('meta', { id: 'categories', list: categories });
       await db.putMany('items', items);
       await db.putMany('outfits', outfits);
       await db.putMany('wishes', wishes);
@@ -154,6 +161,7 @@ export function renderSettings(root, { state, reload, tabbar }) {
       await db.clear('outfits');
       await db.clear('wishes');
       await db.clear('palette');
+      await db.clear('meta');
       await reload();
       showLastBackup();
       showStorage();

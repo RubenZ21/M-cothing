@@ -1,4 +1,5 @@
-export const CATEGORIES = [
+/** The categories the app starts with. She can rename, add, remove and reorder them (Edit categories). */
+export const DEFAULT_CATEGORIES = [
   { id: 'tops', label: 'Tops', one: 'top' },
   { id: 'blouses', label: 'Blouses', one: 'blouse' },
   { id: 'pants', label: 'Pants', one: 'pants' },
@@ -7,7 +8,9 @@ export const CATEGORIES = [
   { id: 'jackets', label: 'Jackets', one: 'jacket' },
   { id: 'blazers', label: 'Blazers', one: 'blazer' },
   { id: 'cardigans', label: 'Cardigans', one: 'cardigan' },
-  { id: 'kimonos', label: 'Kimonos & Open Vests', one: 'kimono' },
+  { id: 'openfront', label: 'Open-front Cardigans', one: 'open-front cardigan' },
+  { id: 'kimonos', label: 'Kimonos', one: 'kimono' },
+  { id: 'vests', label: 'Open Vests', one: 'open vest' },
   { id: 'shoes', label: 'Shoes', one: 'shoes' },
   { id: 'hats', label: 'Hats', one: 'hat' },
   { id: 'bags', label: 'Bags', one: 'bag' },
@@ -21,6 +24,26 @@ export const CATEGORIES = [
 ];
 
 /**
+ * The categories in use: her own list once she has edited it, else the defaults.
+ * Changed in place (setCategories) so every module that imported it sees the change.
+ */
+export const CATEGORIES = DEFAULT_CATEGORIES.map((c) => ({ ...c }));
+
+export function setCategories(list) {
+  const clean = (list || []).filter((c) => c && c.id && c.label);
+  CATEGORIES.splice(0, CATEGORIES.length, ...(clean.length ? clean : DEFAULT_CATEGORIES).map((c) => ({ ...c })));
+}
+
+/** "Jumpsuits" -> "jumpsuit", "Dresses" -> "dress": the word used in automatic names. */
+export function singular(label) {
+  const w = String(label).trim().toLowerCase();
+  if (/sses$/.test(w)) return w.slice(0, -2);
+  if (/ies$/.test(w)) return `${w.slice(0, -3)}y`;
+  if (/[^s]s$/.test(w) && w.length > 3) return w.slice(0, -1);
+  return w;
+}
+
+/**
  * Old category, replaced by the ones above in 1.08. Pieces saved in it keep it
  * until she picks a new category; it is shown only while it still has pieces.
  */
@@ -28,9 +51,20 @@ export const LEGACY_CATEGORIES = [
   { id: 'accessories', label: 'Accessories', one: 'accessory', legacy: true }
 ];
 
-/** Categories to show for a set of pieces: all current ones, plus old ones still in use. */
+/** A category id that isn't in the list (e.g. from a backup of another phone). */
+function unknownCategory(id) {
+  const label = String(id || 'Other').replace(/[-_]+/g, ' ').replace(/^./, (c) => c.toUpperCase());
+  return { id, label, one: singular(label), legacy: true };
+}
+
+/** Categories to show for a set of pieces: all current ones, plus old/unknown ones still in use. */
 export function categoriesFor(items) {
-  return [...CATEGORIES, ...LEGACY_CATEGORIES.filter((c) => items.some((i) => i.category === c.id))];
+  const extra = [];
+  for (const i of items) {
+    if (!i.category || CATEGORIES.some((c) => c.id === i.category) || extra.some((c) => c.id === i.category)) continue;
+    extra.push(catById(i.category));
+  }
+  return [...CATEGORIES, ...extra];
 }
 
 export const SEASONS = [
@@ -40,7 +74,7 @@ export const SEASONS = [
   { id: 'winter', label: 'Winter' }
 ];
 
-export const catById = (id) => CATEGORIES.find((c) => c.id === id) || LEGACY_CATEGORIES.find((c) => c.id === id);
+export const catById = (id) => (id ? CATEGORIES.find((c) => c.id === id) || LEGACY_CATEGORIES.find((c) => c.id === id) || unknownCategory(id) : undefined);
 export const seasonById = (id) => SEASONS.find((s) => s.id === id);
 
 /** Northern-hemisphere season for today. */
@@ -66,7 +100,9 @@ export const PLACEMENT = {
   jackets: { x: 0.5, y: 0.35, w: 0.58 },
   blazers: { x: 0.5, y: 0.35, w: 0.58 },
   cardigans: { x: 0.5, y: 0.35, w: 0.58 },
+  openfront: { x: 0.5, y: 0.36, w: 0.6 },
   kimonos: { x: 0.5, y: 0.37, w: 0.6 },
+  vests: { x: 0.5, y: 0.36, w: 0.56 },
   dresses: { x: 0.5, y: 0.45, w: 0.5 },
   pants: { x: 0.5, y: 0.64, w: 0.42 },
   skirts: { x: 0.5, y: 0.6, w: 0.44 },

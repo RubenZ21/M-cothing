@@ -1,10 +1,10 @@
 // Offline support. Online, the app always loads the newest files; the cache is
 // only used when the network is unavailable. Bump CACHE with every release.
-const CACHE = 'wardrobe-1.15'; // keep in step with js/version.js
+const CACHE = 'wardrobe-1.16'; // keep in step with js/version.js
 const SHELL = [
   './', 'index.html', 'styles.css', 'manifest.webmanifest',
   'js/app.js', 'js/add.js', 'js/bg.js', 'js/builder.js', 'js/constants.js', 'js/db.js',
-  'js/icons.js', 'js/images.js', 'js/settings.js', 'js/util.js', 'js/version.js', 'js/wish.js', 'js/link.js', 'js/share.js', 'js/backup.js', 'js/palette.js', 'vendor/fflate.js',
+  'js/icons.js', 'js/images.js', 'js/settings.js', 'js/util.js', 'js/version.js', 'js/wish.js', 'js/link.js', 'js/share.js', 'js/backup.js', 'js/palette.js', 'js/categories.js', 'vendor/fflate.js',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png'
 ];
 

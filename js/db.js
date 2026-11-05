@@ -1,6 +1,6 @@
 // Small promise wrapper around IndexedDB. Photos are stored as Blobs.
 const DB_NAME = 'wardrobe';
-const DB_VERSION = 3;
+const DB_VERSION = 4;
 let dbPromise;
 
 function open() {
@@ -13,6 +13,7 @@ function open() {
         if (!db.objectStoreNames.contains('outfits')) db.createObjectStore('outfits', { keyPath: 'id' });
         if (!db.objectStoreNames.contains('wishes')) db.createObjectStore('wishes', { keyPath: 'id' });
         if (!db.objectStoreNames.contains('palette')) db.createObjectStore('palette', { keyPath: 'id' });
+        if (!db.objectStoreNames.contains('meta')) db.createObjectStore('meta', { keyPath: 'id' }); // e.g. her category list
       };
       req.onsuccess = () => resolve(req.result);
       req.onerror = () => reject(req.error);
