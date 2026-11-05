@@ -75,8 +75,8 @@ export const PLACEMENT = {
 };
 
 /** Scrolls a horizontal chip row so its selected chip is in view (centred). */
-export function revealSelected(row, smooth = false) {
-  const on = row?.querySelector('[aria-pressed=true], [aria-selected=true]');
+export function revealSelected(row, smooth = false, selector = '[aria-pressed=true], [aria-selected=true]') {
+  const on = row?.querySelector(selector);
   if (!on) return;
   const r = row.getBoundingClientRect(), c = on.getBoundingClientRect();
   const left = row.scrollLeft + (c.left + c.width / 2) - (r.left + r.width / 2);

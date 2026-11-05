@@ -44,19 +44,27 @@ export async function buildBackupZip(state) {
   for (const w of state.wishes) {
     wishes.push({ ...w, image: await add('wishlist', w.name, w.id, w.image), thumb: await add('_thumbnails/wishlist', w.name, w.id, w.thumb) });
   }
-  const data = { app: 'wardrobe', version: 2, appVersion: VERSION, exported: new Date().toISOString(), items, outfits, wishes };
+  let palette = null;
+  if (state.palette) {
+    const photos = [];
+    for (const [k, p] of (state.palette.photos || []).entries()) {
+      photos.push({ ...p, image: await add('palette', `Analysis photo ${k + 1}`, p.id, p.image), thumb: await add('_thumbnails/palette', `Analysis photo ${k + 1}`, p.id, p.thumb) });
+    }
+    palette = { ...state.palette, photos };
+  }
+  const data = { app: 'wardrobe', version: 2, appVersion: VERSION, exported: new Date().toISOString(), items, outfits, wishes, palette };
   files['data.json'] = [strToU8(JSON.stringify(data, null, 1)), { level: 6 }];
   files['README.txt'] = [strToU8(
     `Minja's Wardrobe backup (app version ${VERSION}, ${new Date().toLocaleString()})\r\n\r\n`
     + 'To restore: open the app, Settings > Restore from a backup, and choose this .zip file.\r\n'
-    + 'The folders hold the pictures (clothes, outfits, wishlist); data.json holds the rest.\r\n'
+    + 'The folders hold the pictures (clothes, outfits, wishlist, palette); data.json holds the rest.\r\n'
   ), { level: 6 }];
 
   const zipped = zipSync(files);
   return new File([zipped], backupFileName(), { type: 'application/zip' });
 }
 
-/** Reads a backup (.zip, or an older .json) into { items, outfits, wishes } with Blobs. */
+/** Reads a backup (.zip, or an older .json) into { items, outfits, wishes, palette } with Blobs. */
 export async function readBackup(file) {
   const bytes = new Uint8Array(await file.arrayBuffer());
   const isZip = bytes[0] === 0x50 && bytes[1] === 0x4b; // "PK"
@@ -78,7 +86,8 @@ export async function readBackup(file) {
   return {
     items: (data.items || []).map((i) => ({ ...i, image: pic(i.image), thumb: pic(i.thumb) })),
     outfits: (data.outfits || []).map((o) => ({ ...o, thumb: pic(o.thumb) })),
-    wishes: (data.wishes || []).map((w) => ({ ...w, image: pic(w.image), thumb: pic(w.thumb) }))
+    wishes: (data.wishes || []).map((w) => ({ ...w, image: pic(w.image), thumb: pic(w.thumb) })),
+    palette: data.palette ? { ...data.palette, photos: (data.palette.photos || []).map((p) => ({ ...p, image: pic(p.image), thumb: pic(p.thumb) })) } : null
   };
 }
 

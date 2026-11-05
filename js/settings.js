@@ -25,7 +25,7 @@ export function renderSettings(root, { state, reload, tabbar }) {
     <div class="settings">
       <section class="card">
         <h2>Backup</h2>
-        <p class="muted">All clothes, photos, outfits and wishes live only on this phone. If the phone is lost or broken, they are gone, unless you have a backup.</p>
+        <p class="muted">All clothes, photos, outfits, wishes and your palette live only on this phone. If the phone is lost or broken, they are gone, unless you have a backup.</p>
         <p class="muted">The backup is one <strong>.zip</strong> file with all pictures and details. <strong>Save it on this phone</strong> (Downloads folder), and now and then <strong>send a copy</strong> to Google Drive or your email, so it survives if the phone is lost. To move to a new phone, open the app there and restore the file.</p>
         <p id="last-backup" class="backup-status"></p>
         <button type="button" class="btn-primary" data-act="save-backup">${icon('download')} Save backup on this phone</button>
@@ -58,7 +58,7 @@ export function renderSettings(root, { state, reload, tabbar }) {
 
       <section class="card">
         <h2>Start over</h2>
-        <button type="button" class="btn-secondary danger" data-act="wipe">${icon('trash')} Delete all clothes, outfits and wishes</button>
+        <button type="button" class="btn-secondary danger" data-act="wipe">${icon('trash')} Delete everything (clothes, outfits, wishes, palette)</button>
       </section>
       <p class="muted small center">Minja's Wardrobe v${VERSION} · Background removal by IMG.LY (AGPL)</p>
     </div>
@@ -100,7 +100,8 @@ export function renderSettings(root, { state, reload, tabbar }) {
     if (!file) return;
     try {
       toast('Reading backup…', 4000);
-      const { items, outfits, wishes } = await readBackup(file);
+      const { items, outfits, wishes, palette } = await readBackup(file);
+      if (palette) await db.put('palette', palette);
       await db.putMany('items', items);
       await db.putMany('outfits', outfits);
       await db.putMany('wishes', wishes);
@@ -147,11 +148,12 @@ export function renderSettings(root, { state, reload, tabbar }) {
         alert('The backup could not be made. The phone may be short on memory or storage.');
       } finally { b.disabled = false; showLastBackup(); }
     } else if (act === 'wipe') {
-      if (!confirm('Delete ALL clothes, outfits and wishes from this phone? This cannot be undone.')) return;
+      if (!confirm('Delete ALL clothes, outfits, wishes and the palette from this phone? This cannot be undone.')) return;
       if (state.items.length && !confirm('Last check: do you have a backup? Tap OK to delete everything.')) return;
       await db.clear('items');
       await db.clear('outfits');
       await db.clear('wishes');
+      await db.clear('palette');
       await reload();
       showLastBackup();
       showStorage();

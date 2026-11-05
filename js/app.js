@@ -8,17 +8,19 @@ import { renderAdd } from './add.js';
 import { renderBuilder, renderOutfitThumb } from './builder.js';
 import { renderSettings, backupDue } from './settings.js';
 import { shareOutfit } from './share.js';
+import { renderPalette, emptyPalette, paletteMatch, matchText, colourCount } from './palette.js';
 import { VERSION } from './version.js';
 
 const app = document.getElementById('app');
 const fileInput = document.getElementById('file-input');
-const state = { items: [], outfits: [], wishes: [], filter: 'all', query: '' };
+const state = { items: [], outfits: [], wishes: [], palette: null, filter: 'all', query: '', paletteOnly: false };
 let cleanup = null;
 let pendingFile = null;
 let pendingTarget = 'add'; // which screen the chosen photo goes to: 'add' (closet) or 'wish/new'
 
 async function reload() {
-  const [items, outfits, wishes] = await Promise.all([db.all('items'), db.all('outfits'), db.all('wishes')]);
+  const [items, outfits, wishes, palette] = await Promise.all([db.all('items'), db.all('outfits'), db.all('wishes'), db.get('palette', 'main')]);
+  state.palette = palette || emptyPalette();
   state.items = items.sort((a, b) => b.created - a.created);
   state.wishes = wishes.sort((a, b) => b.created - a.created);
   state.outfits = outfits.sort((a, b) => (b.updated || b.created) - (a.updated || a.created));
@@ -32,6 +34,7 @@ function tabbar(active) {
     <a class="tab" href="#/clothes" ${active === 'clothes' ? 'aria-current="page"' : ''}>${icon('hanger')}Clothes</a>
     <a class="tab" href="#/outfits" ${active === 'outfits' ? 'aria-current="page"' : ''}>${icon('grid')}Outfits</a>
     <a class="tab" href="#/wishlist" ${active === 'wishlist' ? 'aria-current="page"' : ''}>${icon('heart')}Wishlist</a>
+    <a class="tab" href="#/palette" ${active === 'palette' ? 'aria-current="page"' : ''}>${icon('palette')}Palette</a>
     <a class="tab" href="#/settings" ${active === 'settings' ? 'aria-current="page"' : ''}>
       <span class="tab-icon">${icon('settings')}${backupDue(state) ? '<span class="dot" title="Time for a backup"></span>' : ''}</span>Settings${backupDue(state) ? '<span class="visually-hidden"> (time for a backup)</span>' : ''}
     </a>
@@ -65,6 +68,7 @@ function renderClothes() {
     const act = b.dataset.act;
     if (act === 'add') pickPhoto('add');
     else if (act === 'filter') { state.filter = b.dataset.id; updateClothes(true); }
+    else if (act === 'pal-filter') { state.paletteOnly = !state.paletteOnly; updateClothes(); }
     else if (act === 'item') go(`item/${b.dataset.id}`);
   };
   updateClothes();
@@ -73,19 +77,35 @@ function renderClothes() {
 function updateClothes(smooth = false) {
   const q = state.query.trim().toLowerCase();
   const matches = (i) => !q || `${i.name} ${i.colorName} ${catById(i.category)?.label}`.toLowerCase().includes(q);
-  const items = state.items.filter(matches);
+  const usePalette = colourCount(state.palette) > 0;
+  if (!usePalette) state.paletteOnly = false;
+  const match = new Map(usePalette ? state.items.map((i) => [i.id, paletteMatch(state.palette, i.color)]) : []);
+  const items = state.items.filter((i) => matches(i) && (!state.paletteOnly || match.get(i.id)?.kind === 'good'));
   const cats = categoriesFor(state.items);
   if (state.filter !== 'all' && !cats.some((c) => c.id === state.filter)) state.filter = 'all';
   const counts = Object.fromEntries(cats.map((c) => [c.id, items.filter((i) => i.category === c.id).length]));
   app.querySelector('#count').textContent = plural(state.items.length, 'piece');
 
   const chips = [{ id: 'all', label: 'All', n: items.length }, ...cats.filter((c) => counts[c.id] || state.filter === c.id).map((c) => ({ ...c, n: counts[c.id] }))];
-  app.querySelector('#chips').innerHTML = chips.map((c) =>
+  app.querySelector('#chips').innerHTML = (usePalette
+    ? `<button type="button" class="chip pal-toggle" data-act="pal-filter" aria-pressed="${state.paletteOnly}">${icon('palette')} In my palette</button>` : '')
+    + chips.map((c) =>
     `<button type="button" class="chip" data-act="filter" data-id="${c.id}" aria-pressed="${state.filter === c.id}">${c.label}<span class="n">${c.n}</span></button>`).join('');
   // The filter is remembered between tabs: keep its chip in view so it's clear what is shown.
-  revealSelected(app.querySelector('#chips'), smooth);
+  revealSelected(app.querySelector('#chips'), smooth, '[data-act=filter][aria-pressed=true]');
 
-  const tile = (i) => `<button type="button" class="tile" data-act="item" data-id="${i.id}"><img src="${blobUrl(`t:${i.id}`, i.thumb)}" alt="${esc(i.name)}" loading="lazy"></button>`;
+  const mark = (i) => {
+    const m = match.get(i.id);
+    if (!m) return '';
+    return m.kind === 'good'
+      ? `<span class="pal-mark good" title="In your palette: ${esc(matchText(m))}">${icon('check')}</span>`
+      : `<span class="pal-mark avoid" title="Close to a colour to avoid: ${esc(matchText(m))}">${icon('alert')}</span>`;
+  };
+  const label = (i) => {
+    const m = match.get(i.id);
+    return esc(i.name) + (m ? (m.kind === 'good' ? ', in your palette' : ', close to a colour to avoid') : '');
+  };
+  const tile = (i) => `<button type="button" class="tile" data-act="item" data-id="${i.id}" aria-label="${label(i)}"><img src="${blobUrl(`t:${i.id}`, i.thumb)}" alt="" loading="lazy">${mark(i)}</button>`;
   const list = app.querySelector('#list');
   if (!state.items.length) {
     list.innerHTML = `<div class="empty">
@@ -95,7 +115,12 @@ function updateClothes(smooth = false) {
     </div>`;
     return;
   }
-  if (!items.length) { list.innerHTML = `<div class="empty"><p>Nothing matches “${esc(state.query)}”.</p></div>`; return; }
+  if (!items.length) {
+    list.innerHTML = state.paletteOnly
+      ? '<div class="empty"><p>No pieces close to your palette colours here.</p></div>'
+      : `<div class="empty"><p>Nothing matches “${esc(state.query)}”.</p></div>`;
+    return;
+  }
 
   const sections = state.filter === 'all'
     ? cats.filter((c) => counts[c.id]).map((c) => ({ c, list: items.filter((i) => i.category === c.id), limit: 6 }))
@@ -206,6 +231,7 @@ function renderItem(id) {
         <div class="grow"><strong id="color-name">${esc(item.colorName || 'Colour')}</strong></div>
         <label class="link-btn">Change<input type="color" id="color-input" class="visually-hidden" value="${esc(item.color)}"></label>
       </div>
+      <p class="pal-line" id="pal-line" hidden></p>
       ${item.link ? `<a class="btn-secondary" href="${esc(item.link)}" target="_blank" rel="noopener noreferrer">${icon('external')} Shop page</a>` : ''}
       <div>
         <div class="field-label"><span>In outfits</span><small>${plural(usedIn.length, 'outfit')}</small></div>
@@ -221,11 +247,21 @@ function renderItem(id) {
     t = setTimeout(async () => { await db.put('items', item); toast('Saved'); }, 400);
   };
   app.querySelector('#name').addEventListener('input', (e) => { item.name = e.target.value.trim() || item.name; persist(); });
+  const showPal = () => {
+    const el = app.querySelector('#pal-line');
+    const m = colourCount(state.palette) ? paletteMatch(state.palette, item.color) : null;
+    el.hidden = !m;
+    if (!m) return;
+    el.className = `pal-line ${m.kind}`;
+    el.innerHTML = `<span class="pal-chip small" style="background:${esc(m.color.hex)}"></span>${m.kind === 'good' ? 'In your palette: close to' : 'Close to a colour to avoid:'} ${esc(matchText(m))}`;
+  };
+  showPal();
   app.querySelector('#color-input').addEventListener('input', (e) => {
     item.color = e.target.value;
     item.colorName = colorName(item.color);
     app.querySelector('#swatch').style.background = item.color;
     app.querySelector('#color-name').textContent = item.colorName;
+    showPal();
     persist();
   });
   app.onclick = async (e) => {
@@ -318,6 +354,13 @@ async function route() {
   switch (view) {
     case 'outfits': renderOutfits(); break;
     case 'item': renderItem(id); break;
+    case 'palette':
+      cleanup = renderPalette(app, {
+        palette: state.palette,
+        tabbar: tabbar('palette'),
+        save: async (p) => { await db.put('palette', p); state.palette = p; }
+      });
+      break;
     case 'settings':
       cleanup = renderSettings(app, { state, reload, tabbar: tabbar('settings') });
       break;
