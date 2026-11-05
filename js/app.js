@@ -9,14 +9,12 @@ import { renderAdd } from './add.js';
 import { renderBuilder, renderOutfitThumb } from './builder.js';
 import { renderSettings, backupDue } from './settings.js';
 import { shareOutfit } from './share.js';
-import {
-  renderPalette, emptyPalette, paletteMatch, matchMark, matchLine, colourCount, inPalette, checkFilter, paletteToggleHtml, paletteCatsHtml
-} from './palette.js';
+import { renderPalette, emptyPalette } from './palette.js';
 import { VERSION } from './version.js';
 
 const app = document.getElementById('app');
 const fileInput = document.getElementById('file-input');
-const state = { items: [], outfits: [], wishes: [], palette: null, filter: 'all', query: '', palFilter: null, wishPalFilter: null }; // palFilter: null (off), 'all' or a palette category id
+const state = { items: [], outfits: [], wishes: [], palette: null, filter: 'all', query: '' };
 let cleanup = null;
 let pendingFile = null;
 let pendingTarget = 'add'; // which screen the chosen photo goes to: 'add' (closet) or 'wish/new'
@@ -63,7 +61,6 @@ function renderClothes() {
       <input id="q" type="search" placeholder="Search by name or colour" value="${esc(state.query)}" autocomplete="off">
     </div>
     <div class="chips scroll-x" id="chips"></div>
-    <div id="pal-cats"></div>
     <div id="list"></div>
     <button type="button" class="fab" data-act="add" aria-label="Add a piece">${icon('plus')}</button>
     ${tabbar('clothes')}`;
@@ -76,8 +73,6 @@ function renderClothes() {
     if (act === 'add') pickPhoto('add');
     else if (act === 'filter') { state.filter = b.dataset.id; updateClothes(true); }
     else if (act === 'edit-cats') go('categories');
-    else if (act === 'pal-filter') { state.palFilter = state.palFilter ? null : 'all'; updateClothes(); }
-    else if (act === 'pal-cat') { state.palFilter = b.dataset.id; updateClothes(); }
     else if (act === 'item') go(`item/${b.dataset.id}`);
   };
   updateClothes();
@@ -86,30 +81,19 @@ function renderClothes() {
 function updateClothes(smooth = false) {
   const q = state.query.trim().toLowerCase();
   const matches = (i) => !q || `${i.name} ${i.colorName} ${catById(i.category)?.label}`.toLowerCase().includes(q);
-  const usePalette = colourCount(state.palette) > 0;
-  state.palFilter = usePalette ? checkFilter(state.palette, state.palFilter) : null;
-  const match = new Map(usePalette ? state.items.map((i) => [i.id, paletteMatch(state.palette, i.color)]) : []);
-  const items = state.items.filter((i) => matches(i) && (!state.palFilter || inPalette(state.palette, i.color, state.palFilter)));
+  const items = state.items.filter(matches);
   const cats = categoriesFor(state.items);
   if (state.filter !== 'all' && !cats.some((c) => c.id === state.filter)) state.filter = 'all';
   const counts = Object.fromEntries(cats.map((c) => [c.id, items.filter((i) => i.category === c.id).length]));
   app.querySelector('#count').textContent = plural(state.items.length, 'piece');
 
   const chips = [{ id: 'all', label: 'All', n: items.length }, ...cats.filter((c) => counts[c.id] || state.filter === c.id).map((c) => ({ ...c, n: counts[c.id] }))];
-  app.querySelector('#pal-cats').innerHTML = usePalette ? paletteCatsHtml(state.palette, state.palFilter) : '';
-  revealSelected(app.querySelector('.pal-cats'), false, '[aria-pressed=true]');
-  app.querySelector('#chips').innerHTML = (usePalette ? paletteToggleHtml(state.palFilter) : '')
-    + chips.map((c) =>
+  app.querySelector('#chips').innerHTML = chips.map((c) =>
     `<button type="button" class="chip" data-act="filter" data-id="${c.id}" aria-pressed="${state.filter === c.id}">${esc(c.label)}<span class="n">${c.n}</span></button>`).join('');
   // The filter is remembered between tabs: keep its chip in view so it's clear what is shown.
   revealSelected(app.querySelector('#chips'), smooth, '[data-act=filter][aria-pressed=true]');
 
-  const mark = (i) => matchMark(match.get(i.id));
-  const label = (i) => {
-    const m = match.get(i.id);
-    return esc(i.name) + (m ? (m.kind === 'good' ? ', in your palette' : ', close to a colour to avoid') : '');
-  };
-  const tile = (i) => `<button type="button" class="tile" data-act="item" data-id="${i.id}" aria-label="${label(i)}"><img src="${blobUrl(`t:${i.id}`, i.thumb)}" alt="" loading="lazy">${mark(i)}</button>`;
+  const tile = (i) => `<button type="button" class="tile" data-act="item" data-id="${i.id}"><img src="${blobUrl(`t:${i.id}`, i.thumb)}" alt="${esc(i.name)}" loading="lazy"></button>`;
   const list = app.querySelector('#list');
   if (!state.items.length) {
     list.innerHTML = `<div class="empty">
@@ -120,9 +104,7 @@ function updateClothes(smooth = false) {
     return;
   }
   if (!items.length) {
-    list.innerHTML = state.palFilter
-      ? '<div class="empty"><p>No pieces close to your palette colours here.</p></div>'
-      : `<div class="empty"><p>Nothing matches “${esc(state.query)}”.</p></div>`;
+    list.innerHTML = `<div class="empty"><p>Nothing matches “${esc(state.query)}”.</p></div>`;
     return;
   }
 
@@ -235,7 +217,6 @@ function renderItem(id) {
         <div class="grow"><strong id="color-name">${esc(item.colorName || 'Colour')}</strong></div>
         <label class="link-btn">Change<input type="color" id="color-input" class="visually-hidden" value="${esc(item.color)}"></label>
       </div>
-      <p class="pal-line" id="pal-line" hidden></p>
       ${item.link ? `<a class="btn-secondary" href="${esc(item.link)}" target="_blank" rel="noopener noreferrer">${icon('external')} Shop page</a>` : ''}
       <div>
         <div class="field-label"><span>In outfits</span><small>${plural(usedIn.length, 'outfit')}</small></div>
@@ -251,21 +232,11 @@ function renderItem(id) {
     t = setTimeout(async () => { await db.put('items', item); toast('Saved'); }, 400);
   };
   app.querySelector('#name').addEventListener('input', (e) => { item.name = e.target.value.trim() || item.name; persist(); });
-  const showPal = () => {
-    const el = app.querySelector('#pal-line');
-    const m = colourCount(state.palette) ? paletteMatch(state.palette, item.color) : null;
-    el.hidden = !m;
-    if (!m) return;
-    el.className = `pal-line ${m.kind}`;
-    el.innerHTML = matchLine(m);
-  };
-  showPal();
   app.querySelector('#color-input').addEventListener('input', (e) => {
     item.color = e.target.value;
     item.colorName = colorName(item.color);
     app.querySelector('#swatch').style.background = item.color;
     app.querySelector('#color-name').textContent = item.colorName;
-    showPal();
     persist();
   });
   app.onclick = async (e) => {
@@ -412,9 +383,6 @@ async function route() {
       cleanup = renderWishlist(app, {
         wishes: state.wishes,
         tabbar: tabbar('wishlist'),
-        palette: state.palette,
-        palFilter: state.wishPalFilter,
-        onPalFilter: (v) => { state.wishPalFilter = v; route(); },
         onAdd: () => pickPhoto('wish/new'),
         onEdit: (wid) => go(`wish/${wid}`)
       });
@@ -442,7 +410,6 @@ async function route() {
         wish,
         file,
         shared,
-        palette: state.palette,
         onCancel: () => back(),
         onSave: async (w) => {
           await db.put('wishes', w);

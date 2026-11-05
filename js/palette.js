@@ -1,213 +1,20 @@
-// Palette tab: her personal colour palette (John Kitchener's method). Each palette
-// card he made for her belongs to a category she names herself (Sporty,
-// Energetic …); the colours on a card are saved in its category, automatically
-// ("Find colours on this card") or by tapping a spot on the card.
-// In the data a category is a "group": { id, name, kind: 'good' | 'avoid', colors }.
+// Palette tab: photos of her colour palette cards (e.g. from John Kitchener),
+// each with a name. Tap a card to see it full screen, zoom in, rename or delete it.
+//
+// Stored as { id: 'main', photos: [{ id, name, image, thumb, w, h }] }. Older
+// versions also saved colour groups, notes etc. in this record; those are kept
+// untouched (and in the backup) but no longer shown.
 import { esc, uid, blobUrl, toast, plural } from './util.js';
 import { icon } from './icons.js';
-import { fileToCanvas, fitCanvas, canvasToBlob, blobToCanvas } from './images.js';
-
-const HEX = /^#[0-9a-f]{6}$/i;
+import { fileToCanvas, fitCanvas, canvasToBlob } from './images.js';
 
 export function emptyPalette() {
-  return {
-    id: 'main',
-    type: '',
-    notes: '',
-    photos: [], // the palette cards: { id, groupId (its category), image, thumb, w, h }
-    // She makes her own categories (Sporty, Energetic …) as she adds her cards.
-    groups: [{ id: uid(), name: 'Avoid', kind: 'avoid', colors: [] }],
-    updated: 0
-  };
+  return { id: 'main', photos: [], updated: 0 };
 }
 
-export const colourCount = (p) => (p?.groups || []).reduce((n, g) => n + g.colors.length, 0);
-
-// ---------------- colour maths ----------------
-function rgbToLab(r8, g8, b8) {
-  const lin = (v) => { v /= 255; return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; };
-  const r = lin(r8), g = lin(g8), b = lin(b8);
-  const x = (r * 0.4124 + g * 0.3576 + b * 0.1805) / 0.95047;
-  const y = r * 0.2126 + g * 0.7152 + b * 0.0722;
-  const z = (r * 0.0193 + g * 0.1192 + b * 0.9505) / 1.08883;
-  const f = (t) => (t > 0.008856 ? Math.cbrt(t) : 7.787 * t + 16 / 116);
-  return [116 * f(y) - 16, 500 * (f(x) - f(y)), 200 * (f(y) - f(z))];
-}
-const hexToLab = (hex) => rgbToLab(...[1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16)));
-const deltaE = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
-const toHex = (r, g, b) => `#${[r, g, b].map((v) => Math.round(v).toString(16).padStart(2, '0')).join('')}`;
-
-// ---------------- matching clothes and wishes ----------------
-const GOOD_MATCH = 20;  // how close a piece's colour must be to a palette colour
-const AVOID_MATCH = 14;
-
-/**
- * How a piece's main colour relates to the palette:
- * { kind: 'good' | 'avoid', color, group } or null when it is close to nothing.
- * Approximate: it compares one main colour, so patterns match less well.
- */
-export function paletteMatch(palette, hex) {
-  if (!palette || !HEX.test(hex || '')) return null;
-  const lab = hexToLab(hex);
-  let good = null, avoid = null;
-  for (const g of palette.groups) {
-    for (const c of g.colors) {
-      const d = deltaE(lab, hexToLab(c.hex));
-      const hit = { kind: g.kind, color: c, group: g.name, d };
-      if (g.kind === 'avoid') { if (!avoid || d < avoid.d) avoid = hit; } else if (!good || d < good.d) good = hit;
-    }
-  }
-  if (good && good.d <= GOOD_MATCH && (!avoid || good.d <= avoid.d)) return good;
-  if (avoid && avoid.d <= AVOID_MATCH) return avoid;
-  return null;
-}
-
-/** Short text for a match, e.g. "Sporty: close to Terracotta". */
-export function matchText(m) {
-  if (!m) return '';
-  return `${m.group}: close to ${m.color.name || m.color.hex.toUpperCase()}`;
-}
-
-/** Small ✓ / ! badge for a picture of a piece or wish. */
-export function matchMark(m) {
-  if (!m) return '';
-  return m.kind === 'good'
-    ? `<span class="pal-mark good" title="In your palette: ${esc(matchText(m))}">${icon('check')}</span>`
-    : `<span class="pal-mark avoid" title="Close to a colour to avoid: ${esc(matchText(m))}">${icon('alert')}</span>`;
-}
-
-/** One line for a piece or wish page, as HTML ('' when no match). */
-export function matchLine(m) {
-  if (!m) return '';
-  return `<span class="pal-chip small" style="background:${esc(m.color.hex)}"></span>${m.kind === 'good' ? 'In your palette' : 'To avoid'} · ${esc(matchText(m))}`;
-}
-
-// ---------------- "In my palette" filter (Closet and Wishlist) ----------------
-/** Categories that clothes can be filtered on: not the "avoid" ones, and with colours. */
-export const paletteCategories = (p) => (p?.groups || []).filter((g) => g.kind !== 'avoid' && g.colors.length);
-
-/** Is this colour close to the palette? which: 'all' (any category) or a category id. */
-export function inPalette(palette, hex, which = 'all') {
-  if (which === 'all') return paletteMatch(palette, hex)?.kind === 'good';
-  const g = palette.groups.find((x) => x.id === which);
-  if (!g || !HEX.test(hex || '')) return false;
-  const lab = hexToLab(hex);
-  return g.colors.some((c) => deltaE(lab, hexToLab(c.hex)) <= GOOD_MATCH);
-}
-
-/** A remembered filter that no longer makes sense (category deleted) falls back to 'all'. */
-export function checkFilter(palette, which) {
-  if (!which || which === 'all') return which;
-  return paletteCategories(palette).some((g) => g.id === which) ? which : 'all';
-}
-
-/** The "In my palette" switch. which: null (off), 'all' or a category id. */
-export function paletteToggleHtml(which) {
-  return `<button type="button" class="chip pal-toggle" data-act="pal-filter" aria-pressed="${!!which}">${icon('palette')} In my palette</button>`;
-}
-
-/** When the filter is on: one chip per category, to narrow it down. */
-export function paletteCatsHtml(palette, which) {
-  const cats = paletteCategories(palette);
-  if (!which || cats.length < 2) return '';
-  return `<div class="chips scroll-x pal-cats" aria-label="Palette category">${[{ id: 'all', name: 'All my colours' }, ...cats]
-    .map((c) => `<button type="button" class="chip" data-act="pal-cat" data-id="${c.id}" aria-pressed="${which === c.id}">${esc(c.name)}</button>`).join('')}</div>`;
-}
-
-// ---------------- finding the colours on a palette card ----------------
-/**
- * Finds the colour patches on a photo of a palette card: areas of one even
- * colour that are big enough and roughly rectangular, minus the card itself
- * (the large area along the edges). Returns [{ hex, x, y }] in reading order,
- * x/y being the patch centre as fractions of the photo.
- */
-export function findCardColours(src) {
-  const small = fitCanvas(src, 360);
-  const W = small.width, H = small.height, N = W * H;
-  const px = small.getContext('2d').getImageData(0, 0, W, H).data;
-
-  // Light 3x3 blur so fabric texture and camera noise don't split a patch.
-  const R = new Float32Array(N), G = new Float32Array(N), B = new Float32Array(N);
-  for (let y = 0; y < H; y++) {
-    for (let x = 0; x < W; x++) {
-      let r = 0, g = 0, b = 0, n = 0;
-      for (let dy = -1; dy <= 1; dy++) {
-        const yy = y + dy;
-        if (yy < 0 || yy >= H) continue;
-        for (let dx = -1; dx <= 1; dx++) {
-          const xx = x + dx;
-          if (xx < 0 || xx >= W) continue;
-          const i = (yy * W + xx) * 4;
-          r += px[i]; g += px[i + 1]; b += px[i + 2]; n++;
-        }
-      }
-      const k = y * W + x;
-      R[k] = r / n; G[k] = g / n; B[k] = b / n;
-    }
-  }
-  const L = new Float32Array(N), A = new Float32Array(N), Bb = new Float32Array(N);
-  for (let k = 0; k < N; k++) { const lab = rgbToLab(R[k], G[k], B[k]); L[k] = lab[0]; A[k] = lab[1]; Bb[k] = lab[2]; }
-
-  // Grow regions of even colour.
-  const T = 5;
-  const label = new Int32Array(N).fill(-1);
-  const regions = [];
-  const queue = new Int32Array(N);
-  for (let s = 0; s < N; s++) {
-    if (label[s] !== -1) continue;
-    const id = regions.length;
-    const reg = { n: 0, l: 0, a: 0, b: 0, r: 0, g: 0, bl: 0, x0: W, x1: 0, y0: H, y1: 0, border: 0 };
-    let head = 0, tail = 0;
-    queue[tail++] = s; label[s] = id;
-    let ml = L[s], ma = A[s], mb = Bb[s];
-    while (head < tail) {
-      const k = queue[head++];
-      const x = k % W, y = (k - x) / W;
-      reg.n++; reg.l += L[k]; reg.a += A[k]; reg.b += Bb[k]; reg.r += R[k]; reg.g += G[k]; reg.bl += B[k];
-      ml = reg.l / reg.n; ma = reg.a / reg.n; mb = reg.b / reg.n;
-      if (x < reg.x0) reg.x0 = x; if (x > reg.x1) reg.x1 = x;
-      if (y < reg.y0) reg.y0 = y; if (y > reg.y1) reg.y1 = y;
-      if (x === 0 || y === 0 || x === W - 1 || y === H - 1) reg.border++;
-      const nb = [x > 0 ? k - 1 : -1, x < W - 1 ? k + 1 : -1, y > 0 ? k - W : -1, y < H - 1 ? k + W : -1];
-      for (const j of nb) {
-        if (j < 0 || label[j] !== -1) continue;
-        if (Math.hypot(L[j] - ml, A[j] - ma, Bb[j] - mb) < T) { label[j] = id; queue[tail++] = j; }
-      }
-    }
-    regions.push(reg);
-  }
-
-  // The card and the table are told apart from colour patches by shape, not by
-  // colour, so light swatches (ivory, cream) on a cream card are still found:
-  // a patch is a solid block, the card is full of holes where the patches sit.
-  const backgrounds = regions.filter((r) => r.border > 0 && r.n > N * 0.06).map((r) => [r.l / r.n, r.a / r.n, r.b / r.n]);
-  const minArea = Math.max(40, N * 0.0012);
-  const found = [];
-  for (const r of regions.sort((p, q) => q.n - p.n)) {
-    if (r.n < minArea || r.n > N * 0.3) continue;
-    const bw = r.x1 - r.x0 + 1, bh = r.y1 - r.y0 + 1;
-    if (Math.min(bw, bh) < 5 || r.n / (bw * bh) < 0.7) continue; // text, lines, the card with holes
-    if (r.border > (bw + bh) * 0.5) continue; // cut off at the photo edge
-    const lab = [r.l / r.n, r.a / r.n, r.b / r.n];
-    if (backgrounds.some((bg) => deltaE(bg, lab) < 2.5)) continue; // a loose bit of the card itself
-    if (found.some((f) => deltaE(f.lab, lab) < 5)) continue; // same colour twice
-    found.push({ lab, hex: toHex(r.r / r.n, r.g / r.n, r.bl / r.n), x: (r.x0 + bw / 2) / W, y: (r.y0 + bh / 2) / H, top: r.y0 / H });
-  }
-  // Reading order: rows from top to bottom, left to right within a row.
-  found.sort((p, q) => (Math.abs(p.y - q.y) < 0.04 ? p.x - q.x : p.y - q.y));
-  return found.slice(0, 120).map(({ hex, x, y }) => ({ hex, x, y }));
-}
-
-/** Leaves out colours the palette already has (nearly the same). */
-export function newColours(palette, colours) {
-  const have = palette.groups.flatMap((g) => g.colors.map((c) => hexToLab(c.hex)));
-  return colours.filter((c) => !have.some((h) => deltaE(h, hexToLab(c.hex)) < 4));
-}
-
-// ---------------- the tab ----------------
 export function renderPalette(root, { palette, save, tabbar }) {
   root.className = 'app';
-  let lastGroup = palette.groups.find((g) => g.kind === 'good')?.id || palette.groups[0]?.id;
+  palette.photos = palette.photos || [];
 
   const persist = async (msg) => {
     palette.updated = Date.now();
@@ -215,416 +22,186 @@ export function renderPalette(root, { palette, save, tabbar }) {
     if (msg) toast(msg);
   };
 
+  // Cards from older versions were sorted into categories: use that as their name.
+  let named = false;
+  for (const p of palette.photos) {
+    if (!p.name && p.groupId) {
+      const g = (palette.groups || []).find((x) => x.id === p.groupId);
+      if (g) { p.name = g.name; named = true; }
+    }
+  }
+  if (named) persist();
+
+  const cardName = (p) => p.name || 'Palette card';
+
   function render() {
     const y = window.scrollY;
-    const n = colourCount(palette);
-    const swatch = (g, c) => `<button type="button" class="pal-swatch" data-act="swatch" data-g="${g.id}" data-c="${c.id}" aria-label="${esc(c.name || c.hex)}">
-        <span class="pal-chip" style="background:${HEX.test(c.hex) ? c.hex : '#ccc'}"></span>
-        <span class="pal-name">${esc(c.name || '')}</span>
-      </button>`;
-    const card = (p) => `<button type="button" class="pal-card" data-act="photo" data-id="${p.id}" aria-label="Open palette card${p.groupId ? '' : ' (no category yet)'}">
-        <span class="pal-card-img"><img src="${blobUrl(`p:${p.id}`, p.thumb)}" alt=""></span>
-      </button>`;
-    const loose = palette.photos.filter((p) => !palette.groups.some((g) => g.id === p.groupId));
     root.innerHTML = `
       <header class="page-head">
         <h1>Palette</h1>
-        <div class="head-actions"><span>${plural(n, 'colour')}</span></div>
+        <div class="head-actions"><span>${plural(palette.photos.length, 'card')}</span></div>
       </header>
       <div class="palette">
-        <section class="card">
-          <h2>My palette cards</h2>
-          <p class="muted">Each palette card belongs to a category you name yourself, such as <em>Sporty</em> or <em>Energetic</em>. Photograph a card straight from above, in daylight, choose its category, then tap <strong>Find colours on this card</strong>.</p>
-          <label class="btn-primary" id="add-card">${icon('camera')} Add palette card<input type="file" id="p-photos" accept="image/*" multiple class="visually-hidden"></label>
-          <div>
-            <label class="field-label" for="p-type">About my palette <small>Optional</small></label>
-            <input id="p-type" class="text-input" type="text" maxlength="80" autocomplete="off" placeholder="e.g. John Kitchener, 2026" value="${esc(palette.type)}">
-          </div>
-        </section>
-        ${loose.length ? `<section class="card">
-            <h2>Cards without a category</h2>
-            <p class="muted small">Open a card and tap its title to choose a category.</p>
-            <div class="pal-cards">${loose.map(card).join('')}</div>
-          </section>` : ''}
-        ${[...palette.groups.filter((g) => g.kind !== 'avoid'), ...palette.groups.filter((g) => g.kind === 'avoid')].map((g) => {
-          const cards = palette.photos.filter((p) => p.groupId === g.id);
-          return `
-          <section class="card pal-group${g.kind === 'avoid' ? ' avoid' : ''}">
-            <div class="pal-group-head">
-              <h2>${esc(g.name)}<span class="count">${g.colors.length}</span></h2>
-              ${g.kind === 'avoid' ? '<span class="pal-kind">to avoid</span>' : ''}
-              <button type="button" class="icon-btn small" data-act="group" data-g="${g.id}" aria-label="Edit category ${esc(g.name)}">${icon('pencil')}</button>
-            </div>
-            ${cards.length ? `<div class="pal-cards">${cards.map(card).join('')}</div>` : ''}
-            <div class="pal-swatches">
-              ${g.colors.map((c) => swatch(g, c)).join('')}
-              <label class="pal-swatch add" aria-label="Add a colour to ${esc(g.name)}"><span class="pal-chip">${icon('plus')}</span><span class="pal-name">Add</span><input type="color" class="visually-hidden" data-add="${g.id}" value="#c8a46e"></label>
-            </div>
-          </section>`;
-        }).join('')}
-        <button type="button" class="btn-secondary" data-act="add-group">${icon('plus')} Add a category</button>
-        <section class="card">
-          <label class="field-label" for="p-notes">Notes</label>
-          <textarea id="p-notes" class="text-input area" rows="5" placeholder="e.g. gold jewellery, warm red lipstick, soft prints, best contrast level">${esc(palette.notes)}</textarea>
-        </section>
-        <p class="muted small center">Clothes and wishes whose main colour is close to a colour here get a mark, and can be filtered with “In my palette”, also per category.</p>
+        <label class="btn-primary" id="add-card">${icon('camera')} Add palette card<input type="file" id="p-photos" accept="image/*" multiple class="visually-hidden"></label>
+        ${palette.photos.length ? `<div class="pal-cards">
+          ${palette.photos.map((p) => `<button type="button" class="pal-card" data-act="open" data-id="${p.id}">
+              <span class="pal-card-img"><img src="${blobUrl(`p:${p.id}`, p.thumb)}" alt=""></span>
+              <span class="pal-card-name">${esc(cardName(p))}</span>
+            </button>`).join('')}
+        </div>` : `<div class="empty">
+          <h2>No palette cards yet</h2>
+          <p>Take a photo of each of your colour palette cards, straight from above and in daylight, and give it a name.</p>
+        </div>`}
       </div>
       ${tabbar}`;
     window.scrollTo(0, y);
-
-    let t;
-    const later = () => { clearTimeout(t); t = setTimeout(() => persist(), 500); };
-    root.querySelector('#p-type').addEventListener('input', (e) => { palette.type = e.target.value; later(); });
-    root.querySelector('#p-notes').addEventListener('input', (e) => { palette.notes = e.target.value; later(); });
     root.querySelector('#p-photos').addEventListener('change', (e) => addCards([...e.target.files]));
-    root.querySelectorAll('input[data-add]').forEach((inp) => inp.addEventListener('change', async () => {
-      const g = palette.groups.find((x) => x.id === inp.dataset.add);
-      const c = { id: uid(), hex: inp.value, name: '' };
-      g.colors.push(c);
-      await persist();
-      render();
-      openSwatch(g.id, c.id, true);
-    }));
   }
 
   async function addCards(files) {
     if (!files.length) return;
-    toast(files.length > 1 ? `Adding ${files.length} palette cards…` : 'Adding palette card…');
-    let added = null;
     for (const f of files) {
+      let card;
       try {
-        const c = await fileToCanvas(f, 2000);
-        added = {
+        const c = await fileToCanvas(f, 2400);
+        card = {
           id: uid(),
-          groupId: null,
+          name: '',
           image: await canvasToBlob(c, 'image/jpeg', 0.92),
-          thumb: await canvasToBlob(fitCanvas(c, 480), 'image/jpeg', 0.85),
+          thumb: await canvasToBlob(fitCanvas(c, 600), 'image/jpeg', 0.86),
           w: c.width,
           h: c.height
         };
-        palette.photos.push(added);
-        await persist();
-        render();
-        await chooseCategory(added);
       } catch (err) {
         console.error(err);
         alert('One of the photos could not be opened.');
+        continue;
       }
+      palette.photos.push(card);
+      await persist();
+      render();
+      await askName(card, true);
     }
-    await persist(files.length > 1 ? 'Palette cards added' : null);
-    render();
-    // One card: open it straight away, ready for "Find colours".
-    if (files.length === 1 && added) openCard(added.id);
   }
 
-  // ---- sheets ----
-  function sheet(html, onClose) {
-    const dlg = document.createElement('dialog');
-    dlg.className = 'sheet';
-    dlg.innerHTML = `<form method="dialog" class="sheet-body">${html}</form>`;
-    document.body.appendChild(dlg);
-    dlg.addEventListener('click', (e) => { if (e.target === dlg) dlg.close(); });
-    dlg.addEventListener('close', async () => { await onClose(dlg); dlg.remove(); });
-    dlg.showModal();
-    return dlg;
-  }
-
-  /** Asks which category a card belongs to (or a new one); saves it on the card. */
-  function chooseCategory(photo) {
+  /** Name sheet, used after adding a card and from the card view. */
+  function askName(card, isNew = false) {
     return new Promise((resolve) => {
-      let chosen = photo.groupId;
-      const dlg = sheet(`
-        <h2>Which category is this card?</h2>
-        <img class="pal-sheet-card" src="${blobUrl(`p:${photo.id}`, photo.thumb)}" alt="">
-        ${palette.groups.length ? `<div class="chips wrap" role="group" aria-label="Category">${groupChips('data-cg', chosen)}</div>` : ''}
-        <div>
-          <label class="field-label" for="cg-new">Or a new category</label>
-          <input id="cg-new" class="text-input" type="text" maxlength="40" autocomplete="off" placeholder="e.g. Sporty, Energetic">
-        </div>
-        <button type="submit" class="btn-primary" value="ok">OK</button>
-        <button type="button" class="text-btn center" data-x="later">Choose later</button>`,
-      async (d) => {
-        if (d.returnValue === 'ok') {
-          const name = d.querySelector('#cg-new').value.trim();
-          const same = palette.groups.find((g) => g.name.toLowerCase() === name.toLowerCase());
-          if (name && same) chosen = same.id;
-          else if (name) {
-            const g = { id: uid(), name, kind: 'good', colors: [] };
-            palette.groups.push(g);
-            chosen = g.id;
-          }
-          photo.groupId = chosen || null;
-          if (photo.groupId) lastGroup = photo.groupId;
-          await persist(photo.groupId ? `Card added to ${palette.groups.find((g) => g.id === photo.groupId).name}` : null);
-        }
+      const dlg = document.createElement('dialog');
+      dlg.className = 'sheet';
+      dlg.innerHTML = `<form method="dialog" class="sheet-body">
+        <h2>${isNew ? 'Name this card' : 'Rename card'}</h2>
+        <img class="pal-sheet-card" src="${blobUrl(`p:${card.id}`, card.thumb)}" alt="">
+        <div><label class="field-label" for="c-name">Name</label>
+        <input id="c-name" class="text-input" type="text" maxlength="50" autocomplete="off" placeholder="e.g. Sporty, Energetic" value="${esc(card.name || '')}"></div>
+        <button type="submit" class="btn-primary" value="ok">Save</button>
+        ${isNew ? '<button type="button" class="text-btn center" data-x="skip">Skip</button>' : '<button type="button" class="text-btn center" data-x="skip">Cancel</button>'}
+      </form>`;
+      document.body.appendChild(dlg);
+      dlg.addEventListener('click', (e) => { if (e.target === dlg || e.target.closest('[data-x=skip]')) dlg.close(); });
+      dlg.addEventListener('close', async () => {
+        if (dlg.returnValue === 'ok') {
+          card.name = dlg.querySelector('#c-name').value.trim();
+          await persist(isNew ? 'Palette card added' : 'Card renamed');
+        } else if (isNew) toast('Palette card added');
+        dlg.remove();
         render();
-        resolve(photo.groupId);
+        resolve();
       });
-      dlg.addEventListener('click', (e) => {
-        const cg = e.target.closest('[data-cg]');
-        if (cg) {
-          chosen = cg.dataset.cg;
-          dlg.querySelectorAll('[data-cg]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.cg === chosen)));
-          dlg.querySelector('#cg-new').value = '';
-        }
-        if (e.target.closest('[data-x=later]')) dlg.close();
-      });
-      dlg.querySelector('#cg-new').addEventListener('input', (e) => {
-        if (e.target.value.trim()) {
-          chosen = null;
-          dlg.querySelectorAll('[data-cg]').forEach((b) => b.setAttribute('aria-pressed', 'false'));
-        }
-      });
+      dlg.showModal();
+      setTimeout(() => dlg.querySelector('#c-name').focus(), 50);
     });
   }
 
-  function groupChips(attr, selected) {
-    const ordered = [...palette.groups.filter((g) => g.kind !== 'avoid'), ...palette.groups.filter((g) => g.kind === 'avoid')];
-    return ordered.map((g) => `<button type="button" class="chip" ${attr}="${g.id}" aria-pressed="${g.id === selected}">${esc(g.name)}</button>`).join('');
-  }
-
-  function openSwatch(gid, cid, isNew = false) {
-    const g = palette.groups.find((x) => x.id === gid);
-    const c = g.colors.find((x) => x.id === cid);
-    let target = g.id;
-    const dlg = sheet(`
-      <div class="pal-big" id="s-big" style="background:${c.hex}"></div>
-      <div class="pal-hex"><span id="s-hex">${c.hex.toUpperCase()}</span>
-        <label class="link-btn">Change colour<input type="color" id="s-color" class="visually-hidden" value="${c.hex}"></label></div>
-      <div>
-        <label class="field-label" for="s-name">Name <small>Optional</small></label>
-        <input id="s-name" class="text-input" type="text" maxlength="40" autocomplete="off" placeholder="e.g. Terracotta" value="${esc(c.name)}">
-      </div>
-      <div>
-        <div class="field-label"><span id="s-g-label">Category</span></div>
-        <div class="chips wrap" role="group" aria-labelledby="s-g-label">${groupChips('data-sg', g.id)}</div>
-      </div>
-      <button type="submit" class="btn-primary" value="ok">Done</button>
-      <button type="button" class="btn-secondary danger" data-x="del">${icon('trash')} Remove this colour</button>`,
-    async (d) => {
-      const from = palette.groups.find((x) => x.id === gid);
-      if (d.returnValue === 'del') {
-        from.colors = from.colors.filter((x) => x.id !== c.id);
-        await persist('Colour removed');
-      } else {
-        c.name = d.querySelector('#s-name').value.trim();
-        if (target !== gid) {
-          from.colors = from.colors.filter((x) => x.id !== c.id);
-          palette.groups.find((x) => x.id === target).colors.push(c);
-        }
-        await persist(isNew ? `Added to ${palette.groups.find((x) => x.id === target).name}` : null);
-      }
-      render();
-    });
-    dlg.querySelector('#s-color').addEventListener('input', (e) => {
-      c.hex = e.target.value;
-      dlg.querySelector('#s-big').style.background = c.hex;
-      dlg.querySelector('#s-hex').textContent = c.hex.toUpperCase();
-    });
-    dlg.addEventListener('click', (e) => {
-      const sg = e.target.closest('[data-sg]');
-      if (sg) {
-        target = sg.dataset.sg;
-        dlg.querySelectorAll('[data-sg]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.sg === target)));
-      }
-      if (e.target.closest('[data-x=del]') && confirm('Remove this colour?')) dlg.close('del');
-    });
-    if (isNew) setTimeout(() => dlg.querySelector('#s-name').focus(), 50);
-  }
-
-  function openGroup(gid) {
-    const g = gid ? palette.groups.find((x) => x.id === gid) : null;
-    let kind = g?.kind || 'good';
-    const dlg = sheet(`
-      <h2>${g ? 'Category' : 'New category'}</h2>
-      <div>
-        <label class="field-label" for="g-name">Name</label>
-        <input id="g-name" class="text-input" type="text" maxlength="40" autocomplete="off" required placeholder="e.g. Sporty, Energetic" value="${esc(g?.name || '')}">
-      </div>
-      <div class="segmented" role="group" aria-label="Kind">
-        <button type="button" data-kind="good" aria-pressed="${kind === 'good'}">Colours that suit me</button>
-        <button type="button" data-kind="avoid" aria-pressed="${kind === 'avoid'}">Colours to avoid</button>
-      </div>
-      <button type="submit" class="btn-primary" value="ok">${g ? 'Save' : 'Add category'}</button>
-      ${g ? `<button type="button" class="btn-secondary danger" data-x="del">${icon('trash')} Delete this category</button>` : ''}`,
-    async (d) => {
-      if (d.returnValue === 'del') {
-        palette.groups = palette.groups.filter((x) => x.id !== g.id);
-        palette.photos.forEach((p) => { if (p.groupId === g.id) p.groupId = null; });
-        await persist('Category deleted');
-      } else if (d.returnValue === 'ok') {
-        const name = d.querySelector('#g-name').value.trim();
-        if (!name) return;
-        if (g) Object.assign(g, { name, kind });
-        else palette.groups.push({ id: uid(), name, kind, colors: [] });
-        await persist();
-      } else return;
-      render();
-    });
-    dlg.addEventListener('click', (e) => {
-      const k = e.target.closest('[data-kind]');
-      if (k) {
-        kind = k.dataset.kind;
-        dlg.querySelectorAll('[data-kind]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.kind === kind)));
-      }
-      if (e.target.closest('[data-x=del]')) {
-        const msg = g.colors.length ? `Delete “${g.name}” and its ${plural(g.colors.length, 'colour')}? Its cards stay.` : `Delete “${g.name}”? Its cards stay.`;
-        if (confirm(msg)) dlg.close('del');
-      }
-    });
-  }
-
-  // ---- a palette card, large: find colours automatically or tap them ----
-  async function openCard(pid) {
-    const photo = palette.photos.find((p) => p.id === pid);
-    const catName = () => palette.groups.find((g) => g.id === photo.groupId)?.name || 'Choose category';
-    if (photo.groupId) lastGroup = photo.groupId;
+  /** Full-screen view: pinch or double-tap to zoom, drag to look around. */
+  function openCard(id) {
+    const card = palette.photos.find((p) => p.id === id);
+    if (!card) return;
     const dlg = document.createElement('dialog');
     dlg.className = 'viewer';
     dlg.innerHTML = `
       <div class="viewer-top">
         <button type="button" class="icon-btn light" data-v="close" aria-label="Close">${icon('back')}</button>
-        <button type="button" class="viewer-title" data-v="category" aria-label="Category of this card: ${esc(catName())}. Change"><span id="v-name">${esc(catName())}</span>${icon('pencil')}</button>
+        <button type="button" class="viewer-title" data-v="rename" aria-label="Rename ${esc(cardName(card))}"><span id="v-name">${esc(cardName(card))}</span>${icon('pencil')}</button>
         <button type="button" class="icon-btn light" data-v="delete" aria-label="Delete this palette card">${icon('trash')}</button>
       </div>
-      <div class="viewer-stage" id="v-stage"><canvas id="v-cv"></canvas><span class="v-marker" id="v-marker" hidden></span></div>
-      <div class="picker-bar">
-        <button type="button" class="btn-primary" data-v="find">${icon('sparkle')} Find colours on this card</button>
-        <p class="picker-hint" id="v-hint">Or tap a colour on the card to add just that one.</p>
-        <div class="picker-row" id="v-row" hidden><span class="pal-chip big" id="v-chip"></span><strong id="v-hex"></strong>
-          <button type="button" class="btn-small" data-v="add">${icon('plus')} Add</button></div>
-        <div class="chips scroll-x" id="v-groups" aria-label="Add to category">${groupChips('data-vg', lastGroup)}</div>
-      </div>`;
+      <div class="zoom-stage" id="z-stage"><img id="z-img" src="${blobUrl(`pi:${card.id}`, card.image)}" alt="${esc(cardName(card))}" draggable="false"></div>
+      <p class="zoom-hint">Pinch or double-tap to zoom</p>`;
     document.body.appendChild(dlg);
     dlg.showModal();
-    const cv = dlg.querySelector('#v-cv');
-    const full = await blobToCanvas(photo.image);
-    cv.width = full.width; cv.height = full.height;
-    cv.getContext('2d').drawImage(full, 0, 0);
-    const data = full.getContext('2d').getImageData(0, 0, full.width, full.height).data;
-    let picked = null;
 
-    cv.addEventListener('click', (e) => {
-      const r = cv.getBoundingClientRect();
-      const x = Math.round((e.clientX - r.left) * (cv.width / r.width));
-      const y = Math.round((e.clientY - r.top) * (cv.height / r.height));
-      // Average a small square so fabric texture and JPEG noise don't skew the colour.
-      let R = 0, G = 0, B = 0, n = 0;
-      const s = Math.max(2, Math.round(cv.width / 400));
-      for (let yy = Math.max(0, y - s); yy <= Math.min(cv.height - 1, y + s); yy++) {
-        for (let xx = Math.max(0, x - s); xx <= Math.min(cv.width - 1, x + s); xx++) {
-          const i = (yy * cv.width + xx) * 4;
-          R += data[i]; G += data[i + 1]; B += data[i + 2]; n++;
-        }
+    const stage = dlg.querySelector('#z-stage');
+    const img = dlg.querySelector('#z-img');
+    let scale = 1;
+    let base = { w: 0, h: 0 };
+    function fit() {
+      const r = stage.getBoundingClientRect();
+      const ratio = (card.w || img.naturalWidth || 1) / (card.h || img.naturalHeight || 1);
+      base = r.width / r.height > ratio ? { w: r.height * ratio, h: r.height } : { w: r.width, h: r.width / ratio };
+      apply();
+    }
+    // Zoom around a point (cx, cy in stage coordinates) so it stays under the fingers.
+    function apply(cx, cy, prev) {
+      const w = base.w * scale, h = base.h * scale;
+      img.style.width = `${w}px`;
+      img.style.height = `${h}px`;
+      const r = stage.getBoundingClientRect();
+      img.style.margin = `${Math.max(0, (r.height - h) / 2)}px ${Math.max(0, (r.width - w) / 2)}px`;
+      if (prev && cx != null) {
+        const k = scale / prev;
+        stage.scrollLeft = (stage.scrollLeft + cx) * k - cx;
+        stage.scrollTop = (stage.scrollTop + cy) * k - cy;
       }
-      picked = toHex(R / n, G / n, B / n);
-      const stage = dlg.querySelector('#v-stage').getBoundingClientRect();
-      const m = dlg.querySelector('#v-marker');
-      m.hidden = false;
-      m.style.left = `${e.clientX - stage.left}px`;
-      m.style.top = `${e.clientY - stage.top}px`;
-      m.style.background = picked;
-      dlg.querySelector('#v-row').hidden = false;
-      dlg.querySelector('#v-hint').hidden = true;
-      dlg.querySelector('#v-chip').style.background = picked;
-      dlg.querySelector('#v-hex').textContent = picked.toUpperCase();
+    }
+    const setScale = (s, cx, cy) => { const prev = scale; scale = Math.min(5, Math.max(1, s)); apply(cx, cy, prev); };
+    if (img.complete) fit(); else img.onload = fit;
+    const ro = new ResizeObserver(fit);
+    ro.observe(stage);
+
+    const pts = new Map();
+    let pinch = null, lastTap = 0;
+    const local = (e) => { const r = stage.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
+    stage.addEventListener('pointerdown', (e) => {
+      pts.set(e.pointerId, local(e));
+      if (pts.size === 2) {
+        const [a, b] = [...pts.values()];
+        pinch = { d: Math.hypot(a.x - b.x, a.y - b.y) || 1, s: scale };
+      } else if (pts.size === 1) {
+        const now = Date.now();
+        if (now - lastTap < 300) { const p = local(e); setScale(scale > 1.2 ? 1 : 2.5, p.x, p.y); lastTap = 0; } else lastTap = now;
+      }
     });
+    stage.addEventListener('pointermove', (e) => {
+      if (!pts.has(e.pointerId)) return;
+      pts.set(e.pointerId, local(e));
+      if (pinch && pts.size === 2) {
+        const [a, b] = [...pts.values()];
+        setScale(pinch.s * Math.hypot(a.x - b.x, a.y - b.y) / pinch.d, (a.x + b.x) / 2, (a.y + b.y) / 2);
+      }
+    });
+    const up = (e) => { pts.delete(e.pointerId); if (pts.size < 2) pinch = null; };
+    stage.addEventListener('pointerup', up);
+    stage.addEventListener('pointercancel', up);
 
     dlg.addEventListener('click', async (e) => {
-      const vg = e.target.closest('[data-vg]');
-      if (vg) {
-        lastGroup = vg.dataset.vg;
-        dlg.querySelectorAll('[data-vg]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.vg === lastGroup)));
-      }
       const v = e.target.closest('[data-v]')?.dataset.v;
       if (v === 'close') dlg.close();
-      if (v === 'add' && picked) {
-        const g = palette.groups.find((x) => x.id === lastGroup) || palette.groups[0];
-        g.colors.push({ id: uid(), hex: picked, name: '' });
-        await persist(`Added to ${g.name} (${g.colors.length})`);
+      if (v === 'rename') {
+        await askName(card);
+        dlg.querySelector('#v-name').textContent = cardName(card);
       }
-      if (v === 'find') {
-        const btn = e.target.closest('[data-v]');
-        btn.disabled = true;
-        btn.lastChild.textContent = ' Looking for colours…';
-        await new Promise((r) => setTimeout(r, 30)); // let the button text show
-        const found = findCardColours(full);
-        btn.disabled = false;
-        btn.lastChild.textContent = ' Find colours on this card';
-        showFound(found);
-      }
-      if (v === 'category') {
-        await chooseCategory(photo);
-        dlg.querySelector('#v-name').textContent = catName();
-        // New categories appear in the chips below too.
-        dlg.querySelector('#v-groups').innerHTML = groupChips('data-vg', lastGroup);
-      }
-      if (v === 'delete' && confirm('Delete this palette card? The colours you saved from it stay.')) {
-        palette.photos = palette.photos.filter((p) => p.id !== pid);
+      if (v === 'delete' && confirm(`Delete the palette card “${cardName(card)}”?`)) {
+        palette.photos = palette.photos.filter((p) => p.id !== card.id);
         await persist('Palette card deleted');
         dlg.close();
       }
     });
-    dlg.addEventListener('close', () => { dlg.remove(); render(); });
-
-    // Results: every colour found, tap to leave one out, then add them to a group.
-    function showFound(found) {
-      const fresh = newColours(palette, found);
-      const skipped = found.length - fresh.length;
-      if (!fresh.length) {
-        alert(found.length
-          ? 'All colours on this card are already in your palette.'
-          : 'No colour patches were found. Try a sharper photo straight from above, in daylight, or tap the colours one by one.');
-        return;
-      }
-      const keep = new Set(fresh.map((_, i) => i));
-      let target = photo.groupId || lastGroup;
-      const res = sheet(`
-        <h2>${plural(fresh.length, 'colour')} found</h2>
-        <p class="muted small">Tap a colour to leave it out.${skipped ? ` ${plural(skipped, 'colour')} already in your palette ${skipped === 1 ? 'was' : 'were'} skipped.` : ''}</p>
-        <div class="pal-found">${fresh.map((c, i) => `<button type="button" class="pal-found-chip" data-f="${i}" aria-pressed="true" aria-label="${c.hex}" style="background:${c.hex}">${icon('check')}</button>`).join('')}</div>
-        <div>
-          <div class="field-label"><span id="f-g-label">Add to</span></div>
-          <div class="chips wrap" role="group" aria-labelledby="f-g-label">${groupChips('data-fg', target)}</div>
-        </div>
-        <button type="submit" class="btn-primary" value="ok" id="f-add">Add ${plural(fresh.length, 'colour')}</button>
-        <button type="button" class="text-btn center" data-x="close">Cancel</button>`,
-      async (d) => {
-        if (d.returnValue !== 'ok' || !keep.size) return;
-        const g = palette.groups.find((x) => x.id === target) || palette.groups[0];
-        fresh.forEach((c, i) => { if (keep.has(i)) g.colors.push({ id: uid(), hex: c.hex, name: '' }); });
-        lastGroup = target;
-        dlg.querySelectorAll('[data-vg]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.vg === lastGroup)));
-        await persist(`${plural(keep.size, 'colour')} added to ${g.name}`);
-      });
-      res.addEventListener('click', (e) => {
-        const f = e.target.closest('[data-f]');
-        if (f) {
-          const i = +f.dataset.f;
-          keep.has(i) ? keep.delete(i) : keep.add(i);
-          f.setAttribute('aria-pressed', String(keep.has(i)));
-          const addBtn = res.querySelector('#f-add');
-          addBtn.textContent = `Add ${plural(keep.size, 'colour')}`;
-          addBtn.disabled = !keep.size;
-        }
-        const fg = e.target.closest('[data-fg]');
-        if (fg) {
-          target = fg.dataset.fg;
-          res.querySelectorAll('[data-fg]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.fg === target)));
-        }
-        if (e.target.closest('[data-x=close]')) res.close();
-      });
-    }
+    dlg.addEventListener('close', () => { ro.disconnect(); dlg.remove(); render(); });
   }
 
   root.onclick = (e) => {
     const b = e.target.closest('[data-act]');
-    if (!b) return;
-    const act = b.dataset.act;
-    if (act === 'swatch') openSwatch(b.dataset.g, b.dataset.c);
-    else if (act === 'group') openGroup(b.dataset.g);
-    else if (act === 'add-group') openGroup(null);
-    else if (act === 'photo') openCard(b.dataset.id);
+    if (b?.dataset.act === 'open') openCard(b.dataset.id);
   };
 
   render();

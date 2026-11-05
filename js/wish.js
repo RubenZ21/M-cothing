@@ -7,25 +7,18 @@ import {
   fileToCanvas, blobToCanvas, canvasToBlob, makeCanvas, trimAlpha, fitCanvas, encodeTransparent, hasTransparency,
   pieceColour, colorName
 } from './images.js';
-import {
-  paletteMatch, matchMark, matchLine, colourCount, inPalette, checkFilter, paletteToggleHtml, paletteCatsHtml
-} from './palette.js';
 import { findUrl, normalizeUrl, siteName, inspectImage } from './link.js';
 
 // ---------------- List ----------------
-export function renderWishlist(root, { wishes, tabbar, onAdd, onEdit, palette, palFilter = null, onPalFilter }) {
+export function renderWishlist(root, { wishes, tabbar, onAdd, onEdit }) {
   root.className = 'app';
-  const usePalette = colourCount(palette) > 0;
-  const match = new Map(usePalette ? wishes.map((w) => [w.id, paletteMatch(palette, w.color)]) : []);
-  const which = usePalette ? checkFilter(palette, palFilter) : null;
-  const shown = which ? wishes.filter((w) => inPalette(palette, w.color, which)) : wishes;
   const card = (w) => {
     const img = `<img src="${blobUrl(`w:${w.id}`, w.thumb)}" alt="" loading="lazy">`;
     const meta = [w.site !== w.name && w.site, w.price].filter(Boolean).map(esc).join(' · ');
     return `<div class="wcard">
       ${w.url
-        ? `<a class="wcard-img${w.cutout ? '' : ' photo'}" href="${esc(w.url)}" target="_blank" rel="noopener noreferrer" aria-label="Open ${esc(w.name)} on ${esc(w.site || 'the website')}${note(w)}">${img}<span class="wcard-go" aria-hidden="true">${icon('external')}</span>${matchMark(match.get(w.id))}</a>`
-        : `<button type="button" class="wcard-img${w.cutout ? '' : ' photo'}" data-act="edit" data-id="${w.id}" aria-label="${esc(w.name)}, no link yet${note(w)}">${img}${matchMark(match.get(w.id))}</button>`}
+        ? `<a class="wcard-img${w.cutout ? '' : ' photo'}" href="${esc(w.url)}" target="_blank" rel="noopener noreferrer" aria-label="Open ${esc(w.name)} on ${esc(w.site || 'the website')}">${img}<span class="wcard-go" aria-hidden="true">${icon('external')}</span></a>`
+        : `<button type="button" class="wcard-img${w.cutout ? '' : ' photo'}" data-act="edit" data-id="${w.id}" aria-label="${esc(w.name)}, no link yet">${img}</button>`}
       <div class="wcard-body">
         <div class="wcard-text">
           <span class="wcard-name">${esc(w.name)}</span>
@@ -35,17 +28,12 @@ export function renderWishlist(root, { wishes, tabbar, onAdd, onEdit, palette, p
       </div>
     </div>`;
   };
-  function note(w) {
-    const m = match.get(w.id);
-    return m ? (m.kind === 'good' ? ', in your palette' : ', close to a colour to avoid') : '';
-  }
   root.innerHTML = `
     <header class="page-head">
       <h1>Wishlist</h1>
       <div class="head-actions"><span>${plural(wishes.length, 'wish', 'wishes')}</span></div>
     </header>
-    ${usePalette && wishes.length ? `<div class="chips">${paletteToggleHtml(which)}</div>${paletteCatsHtml(palette, which)}` : ''}
-    ${shown.length ? `<div class="wgrid">${shown.map(card).join('')}</div>` : wishes.length ? '<div class="empty"><p>No wishes close to your palette colours yet.</p></div>' : `<div class="empty">
+    ${wishes.length ? `<div class="wgrid">${wishes.map(card).join('')}</div>` : `<div class="empty">
       <h2>Nothing on the wishlist yet</h2>
       <p>Found something you love online? Take a screenshot, then tap <strong>+</strong> and choose it.</p>
       <p class="small">On a Samsung phone the shop link is read from the screenshot by itself. Otherwise copy the page's link first (Share → Copy) and tap Paste. Tap a picture later to go straight to the shop.</p>
@@ -57,14 +45,12 @@ export function renderWishlist(root, { wishes, tabbar, onAdd, onEdit, palette, p
     if (!b) return;
     if (b.dataset.act === 'add') onAdd();
     if (b.dataset.act === 'edit') onEdit(b.dataset.id);
-    if (b.dataset.act === 'pal-filter') onPalFilter(which ? null : 'all');
-    if (b.dataset.act === 'pal-cat') onPalFilter(b.dataset.id);
   };
   return () => { root.onclick = null; };
 }
 
 // ---------------- Add / edit ----------------
-export function renderWishForm(root, { wish, file, shared, palette, onSave, onDelete, onMoveToCloset, onCancel }) {
+export function renderWishForm(root, { wish, file, shared, onSave, onDelete, onMoveToCloset, onCancel }) {
   let orig = null;       // the screenshot (or the saved picture when editing)
   let work = null;       // orig after cropping
   let mask = null;       // background-removal result for `work`
@@ -130,12 +116,6 @@ export function renderWishForm(root, { wish, file, shared, palette, onSave, onDe
         <label class="field-label" for="price">Price <small>Optional</small></label>
         <input id="price" class="text-input" type="text" maxlength="20" autocomplete="off" placeholder="e.g. €49.95" value="${esc(wish?.price || '')}">
       </div>
-      <div class="color-row">
-        <span class="swatch" id="w-swatch"></span>
-        <div class="grow"><strong id="w-color-name">Colour</strong><span class="muted" id="w-color-src">Picked from the picture</span></div>
-        <label class="link-btn">Change<input type="color" id="w-color" class="visually-hidden"></label>
-      </div>
-      <p class="pal-line" id="w-pal" hidden></p>
       <div>
         <div class="field-label"><span id="wcat-label">Category</span><small>Optional</small></div>
         <div class="chips wrap" role="group" aria-labelledby="wcat-label">
@@ -163,18 +143,6 @@ export function renderWishForm(root, { wish, file, shared, palette, onSave, onDe
 
   function autoName() {
     return shared?.title?.trim() || siteName(normalizeUrl(urlInput.value)) || 'Wish';
-  }
-
-  function showColour() {
-    if (!color) return;
-    $('#w-swatch').style.background = color.hex;
-    $('#w-color-name').textContent = color.name;
-    $('#w-color').value = color.hex;
-    $('#w-color-src').textContent = colorManual ? 'Chosen by hand' : 'Picked from the picture';
-    const m = colourCount(palette) ? paletteMatch(palette, color.hex) : null;
-    const line = $('#w-pal');
-    line.hidden = !m;
-    if (m) { line.className = `pal-line ${m.kind}`; line.innerHTML = matchLine(m); }
   }
 
   function refresh() {
@@ -231,7 +199,6 @@ export function renderWishForm(root, { wish, file, shared, palette, onSave, onDe
       const hex = pieceColour(shownPic);
       color = { hex, name: colorName(hex) };
     }
-    showColour();
     fit();
     placeBox();
   }
@@ -363,11 +330,6 @@ export function renderWishForm(root, { wish, file, shared, palette, onSave, onDe
   $('#shot').addEventListener('change', (e) => { const f = e.target.files[0]; if (f) loadFile(f); });
   $('#shot-files').addEventListener('change', (e) => { const f = e.target.files[0]; if (f) loadFile(f); });
 
-  $('#w-color').addEventListener('input', (e) => {
-    color = { hex: e.target.value, name: colorName(e.target.value) };
-    colorManual = true;
-    showColour();
-  });
   urlInput.addEventListener('input', () => { $('#url-src').textContent = ''; if (normalizeUrl(urlInput.value)) $('#no-link').hidden = true; refresh(); });
   urlInput.addEventListener('blur', () => {
     const u = findUrl(urlInput.value);

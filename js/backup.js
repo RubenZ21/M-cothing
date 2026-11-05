@@ -48,7 +48,8 @@ export async function buildBackupZip(state) {
   if (state.palette) {
     const photos = [];
     for (const [k, p] of (state.palette.photos || []).entries()) {
-      photos.push({ ...p, image: await add('palette', `Analysis photo ${k + 1}`, p.id, p.image), thumb: await add('_thumbnails/palette', `Analysis photo ${k + 1}`, p.id, p.thumb) });
+      const name = p.name || `Palette card ${k + 1}`;
+      photos.push({ ...p, image: await add('palette', name, p.id, p.image), thumb: await add('_thumbnails/palette', name, p.id, p.thumb) });
     }
     palette = { ...state.palette, photos };
   }

@@ -368,3 +368,11 @@ dialog.viewer::backdrop { background: #1f1c1d; }
 .icon-btn.danger { color: var(--danger); }
 #add-form .btn-small { height: 48px; display: flex; align-items: center; gap: 4px; flex: none; }
 #add-form .btn-small .icon { width: 18px; height: 18px; }
+
+/* palette: simple card viewer */
+.palette > #add-card { margin-top: 4px; }
+.palette .pal-cards { margin-top: 4px; }
+.pal-card-img { aspect-ratio: 4 / 3; }
+.zoom-stage { flex: 1; min-height: 0; overflow: auto; touch-action: pan-x pan-y; -webkit-overflow-scrolling: touch; }
+.zoom-stage img { display: block; max-width: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+.zoom-hint { margin: 0; padding: 10px 16px calc(12px + var(--safe-b)); text-align: center; font-size: 13px; color: rgba(255, 255, 255, .7); }
