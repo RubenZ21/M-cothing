@@ -1,6 +1,7 @@
-// Palette tab: her personal colour analysis (e.g. John Kitchener's method):
-// photos of the analysis, colour groups with any number of colours, and notes.
-// Colours can be picked straight from the analysis photos.
+// Palette tab: her personal colour palette (John Kitchener's method): photos of
+// the palette cards he made for her, the colours saved from them in groups, and
+// notes. Colours come from the cards automatically ("Find colours on this card")
+// or by tapping a spot on a card.
 import { esc, uid, blobUrl, toast, plural } from './util.js';
 import { icon } from './icons.js';
 import { fileToCanvas, fitCanvas, canvasToBlob, blobToCanvas } from './images.js';
@@ -12,7 +13,7 @@ export function emptyPalette() {
     id: 'main',
     type: '',
     notes: '',
-    photos: [],
+    photos: [], // the palette cards: { id, name, image, thumb, w, h }
     groups: [
       { id: uid(), name: 'My colours', kind: 'good', colors: [] },
       { id: uid(), name: 'Neutrals', kind: 'good', colors: [] },
@@ -24,18 +25,21 @@ export function emptyPalette() {
 
 export const colourCount = (p) => (p?.groups || []).reduce((n, g) => n + g.colors.length, 0);
 
-// ---------------- colour matching (for the closet) ----------------
-function hexToLab(hex) {
+// ---------------- colour maths ----------------
+function rgbToLab(r8, g8, b8) {
   const lin = (v) => { v /= 255; return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; };
-  const [r, g, b] = [1, 3, 5].map((i) => lin(parseInt(hex.slice(i, i + 2), 16)));
+  const r = lin(r8), g = lin(g8), b = lin(b8);
   const x = (r * 0.4124 + g * 0.3576 + b * 0.1805) / 0.95047;
   const y = r * 0.2126 + g * 0.7152 + b * 0.0722;
   const z = (r * 0.0193 + g * 0.1192 + b * 0.9505) / 1.08883;
   const f = (t) => (t > 0.008856 ? Math.cbrt(t) : 7.787 * t + 16 / 116);
   return [116 * f(y) - 16, 500 * (f(x) - f(y)), 200 * (f(y) - f(z))];
 }
+const hexToLab = (hex) => rgbToLab(...[1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16)));
 const deltaE = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+const toHex = (r, g, b) => `#${[r, g, b].map((v) => Math.round(v).toString(16).padStart(2, '0')).join('')}`;
 
+// ---------------- matching clothes and wishes ----------------
 const GOOD_MATCH = 20;  // how close a piece's colour must be to a palette colour
 const AVOID_MATCH = 14;
 
@@ -60,11 +64,114 @@ export function paletteMatch(palette, hex) {
   return null;
 }
 
-/** Short text for a match, e.g. "Close to Terracotta (My colours)". */
+/** Short text for a match, e.g. "Terracotta (My colours)". */
 export function matchText(m) {
   if (!m) return '';
-  const what = m.color.name ? `${m.color.name}` : m.color.hex.toUpperCase();
-  return `${what} (${m.group})`;
+  return `${m.color.name || m.color.hex.toUpperCase()} (${m.group})`;
+}
+
+/** Small ✓ / ! badge for a picture of a piece or wish. */
+export function matchMark(m) {
+  if (!m) return '';
+  return m.kind === 'good'
+    ? `<span class="pal-mark good" title="In your palette: ${esc(matchText(m))}">${icon('check')}</span>`
+    : `<span class="pal-mark avoid" title="Close to a colour to avoid: ${esc(matchText(m))}">${icon('alert')}</span>`;
+}
+
+/** One line for a piece or wish page, as HTML ('' when no match). */
+export function matchLine(m) {
+  if (!m) return '';
+  return `<span class="pal-chip small" style="background:${esc(m.color.hex)}"></span>${m.kind === 'good' ? 'In your palette: close to' : 'Close to a colour to avoid:'} ${esc(matchText(m))}`;
+}
+
+// ---------------- finding the colours on a palette card ----------------
+/**
+ * Finds the colour patches on a photo of a palette card: areas of one even
+ * colour that are big enough and roughly rectangular, minus the card itself
+ * (the large area along the edges). Returns [{ hex, x, y }] in reading order,
+ * x/y being the patch centre as fractions of the photo.
+ */
+export function findCardColours(src) {
+  const small = fitCanvas(src, 360);
+  const W = small.width, H = small.height, N = W * H;
+  const px = small.getContext('2d').getImageData(0, 0, W, H).data;
+
+  // Light 3x3 blur so fabric texture and camera noise don't split a patch.
+  const R = new Float32Array(N), G = new Float32Array(N), B = new Float32Array(N);
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      let r = 0, g = 0, b = 0, n = 0;
+      for (let dy = -1; dy <= 1; dy++) {
+        const yy = y + dy;
+        if (yy < 0 || yy >= H) continue;
+        for (let dx = -1; dx <= 1; dx++) {
+          const xx = x + dx;
+          if (xx < 0 || xx >= W) continue;
+          const i = (yy * W + xx) * 4;
+          r += px[i]; g += px[i + 1]; b += px[i + 2]; n++;
+        }
+      }
+      const k = y * W + x;
+      R[k] = r / n; G[k] = g / n; B[k] = b / n;
+    }
+  }
+  const L = new Float32Array(N), A = new Float32Array(N), Bb = new Float32Array(N);
+  for (let k = 0; k < N; k++) { const lab = rgbToLab(R[k], G[k], B[k]); L[k] = lab[0]; A[k] = lab[1]; Bb[k] = lab[2]; }
+
+  // Grow regions of even colour.
+  const T = 5;
+  const label = new Int32Array(N).fill(-1);
+  const regions = [];
+  const queue = new Int32Array(N);
+  for (let s = 0; s < N; s++) {
+    if (label[s] !== -1) continue;
+    const id = regions.length;
+    const reg = { n: 0, l: 0, a: 0, b: 0, r: 0, g: 0, bl: 0, x0: W, x1: 0, y0: H, y1: 0, border: 0 };
+    let head = 0, tail = 0;
+    queue[tail++] = s; label[s] = id;
+    let ml = L[s], ma = A[s], mb = Bb[s];
+    while (head < tail) {
+      const k = queue[head++];
+      const x = k % W, y = (k - x) / W;
+      reg.n++; reg.l += L[k]; reg.a += A[k]; reg.b += Bb[k]; reg.r += R[k]; reg.g += G[k]; reg.bl += B[k];
+      ml = reg.l / reg.n; ma = reg.a / reg.n; mb = reg.b / reg.n;
+      if (x < reg.x0) reg.x0 = x; if (x > reg.x1) reg.x1 = x;
+      if (y < reg.y0) reg.y0 = y; if (y > reg.y1) reg.y1 = y;
+      if (x === 0 || y === 0 || x === W - 1 || y === H - 1) reg.border++;
+      const nb = [x > 0 ? k - 1 : -1, x < W - 1 ? k + 1 : -1, y > 0 ? k - W : -1, y < H - 1 ? k + W : -1];
+      for (const j of nb) {
+        if (j < 0 || label[j] !== -1) continue;
+        if (Math.hypot(L[j] - ml, A[j] - ma, Bb[j] - mb) < T) { label[j] = id; queue[tail++] = j; }
+      }
+    }
+    regions.push(reg);
+  }
+
+  // The card and the table are told apart from colour patches by shape, not by
+  // colour, so light swatches (ivory, cream) on a cream card are still found:
+  // a patch is a solid block, the card is full of holes where the patches sit.
+  const backgrounds = regions.filter((r) => r.border > 0 && r.n > N * 0.06).map((r) => [r.l / r.n, r.a / r.n, r.b / r.n]);
+  const minArea = Math.max(40, N * 0.0012);
+  const found = [];
+  for (const r of regions.sort((p, q) => q.n - p.n)) {
+    if (r.n < minArea || r.n > N * 0.3) continue;
+    const bw = r.x1 - r.x0 + 1, bh = r.y1 - r.y0 + 1;
+    if (Math.min(bw, bh) < 5 || r.n / (bw * bh) < 0.7) continue; // text, lines, the card with holes
+    if (r.border > (bw + bh) * 0.5) continue; // cut off at the photo edge
+    const lab = [r.l / r.n, r.a / r.n, r.b / r.n];
+    if (backgrounds.some((bg) => deltaE(bg, lab) < 2.5)) continue; // a loose bit of the card itself
+    if (found.some((f) => deltaE(f.lab, lab) < 5)) continue; // same colour twice
+    found.push({ lab, hex: toHex(r.r / r.n, r.g / r.n, r.bl / r.n), x: (r.x0 + bw / 2) / W, y: (r.y0 + bh / 2) / H, top: r.y0 / H });
+  }
+  // Reading order: rows from top to bottom, left to right within a row.
+  found.sort((p, q) => (Math.abs(p.y - q.y) < 0.04 ? p.x - q.x : p.y - q.y));
+  return found.slice(0, 120).map(({ hex, x, y }) => ({ hex, x, y }));
+}
+
+/** Leaves out colours the palette already has (nearly the same). */
+export function newColours(palette, colours) {
+  const have = palette.groups.flatMap((g) => g.colors.map((c) => hexToLab(c.hex)));
+  return colours.filter((c) => !have.some((h) => deltaE(h, hexToLab(c.hex)) < 4));
 }
 
 // ---------------- the tab ----------------
@@ -77,6 +184,7 @@ export function renderPalette(root, { palette, save, tabbar }) {
     await save(palette);
     if (msg) toast(msg);
   };
+  const cardName = (p, k) => p.name || `Card ${k + 1}`;
 
   function render() {
     const y = window.scrollY;
@@ -92,16 +200,18 @@ export function renderPalette(root, { palette, save, tabbar }) {
       </header>
       <div class="palette">
         <section class="card">
-          <div>
-            <label class="field-label" for="p-type">My colouring</label>
-            <input id="p-type" class="text-input" type="text" maxlength="80" autocomplete="off" placeholder="e.g. John Kitchener personal palette" value="${esc(palette.type)}">
+          <h2>My palette cards</h2>
+          ${palette.photos.length ? '' : '<p class="muted">Photograph each palette card John Kitchener made for you: straight from above, in daylight, without shadows. Then tap a card and choose <strong>Find colours on this card</strong>.</p>'}
+          <div class="pal-cards">
+            ${palette.photos.map((p, k) => `<button type="button" class="pal-card" data-act="photo" data-id="${p.id}">
+                <span class="pal-card-img"><img src="${blobUrl(`p:${p.id}`, p.thumb)}" alt=""></span>
+                <span class="pal-card-name">${esc(cardName(p, k))}</span>
+              </button>`).join('')}
+            <label class="pal-card add">${icon('camera')}<span>Add palette card</span><input type="file" id="p-photos" accept="image/*" multiple class="visually-hidden"></label>
           </div>
           <div>
-            <div class="field-label"><span>Analysis photos</span><small>Tap one to pick colours from it</small></div>
-            <div class="pal-photos">
-              ${palette.photos.map((p, k) => `<button type="button" class="pal-photo" data-act="photo" data-id="${p.id}" aria-label="Analysis photo ${k + 1}"><img src="${blobUrl(`p:${p.id}`, p.thumb)}" alt=""></button>`).join('')}
-              <label class="pal-photo add">${icon('camera')}<span>Add</span><input type="file" id="p-photos" accept="image/*" multiple class="visually-hidden"></label>
-            </div>
+            <label class="field-label" for="p-type">About my palette <small>Optional</small></label>
+            <input id="p-type" class="text-input" type="text" maxlength="80" autocomplete="off" placeholder="e.g. John Kitchener, 2026" value="${esc(palette.type)}">
           </div>
         </section>
         ${palette.groups.map((g) => `
@@ -121,7 +231,7 @@ export function renderPalette(root, { palette, save, tabbar }) {
           <label class="field-label" for="p-notes">Notes</label>
           <textarea id="p-notes" class="text-input area" rows="5" placeholder="e.g. gold jewellery, warm red lipstick, soft prints, best contrast level">${esc(palette.notes)}</textarea>
         </section>
-        <p class="muted small center">Clothes whose main colour is close to a colour here get a mark in the Closet, and can be filtered with “In my palette”.</p>
+        <p class="muted small center">Clothes and wishes whose main colour is close to a colour here get a mark, and can be filtered with “In my palette”.</p>
       </div>
       ${tabbar}`;
     window.scrollTo(0, y);
@@ -130,7 +240,7 @@ export function renderPalette(root, { palette, save, tabbar }) {
     const later = () => { clearTimeout(t); t = setTimeout(() => persist(), 500); };
     root.querySelector('#p-type').addEventListener('input', (e) => { palette.type = e.target.value; later(); });
     root.querySelector('#p-notes').addEventListener('input', (e) => { palette.notes = e.target.value; later(); });
-    root.querySelector('#p-photos').addEventListener('change', (e) => addPhotos([...e.target.files]));
+    root.querySelector('#p-photos').addEventListener('change', (e) => addCards([...e.target.files]));
     root.querySelectorAll('input[data-add]').forEach((inp) => inp.addEventListener('change', async () => {
       const g = palette.groups.find((x) => x.id === inp.dataset.add);
       const c = { id: uid(), hex: inp.value, name: '' };
@@ -141,26 +251,31 @@ export function renderPalette(root, { palette, save, tabbar }) {
     }));
   }
 
-  async function addPhotos(files) {
+  async function addCards(files) {
     if (!files.length) return;
-    toast(files.length > 1 ? `Adding ${files.length} photos…` : 'Adding photo…');
+    toast(files.length > 1 ? `Adding ${files.length} palette cards…` : 'Adding palette card…');
+    let added = null;
     for (const f of files) {
       try {
         const c = await fileToCanvas(f, 2000);
-        palette.photos.push({
+        added = {
           id: uid(),
-          image: await canvasToBlob(c, 'image/jpeg', 0.9),
-          thumb: await canvasToBlob(fitCanvas(c, 360), 'image/jpeg', 0.85),
+          name: '',
+          image: await canvasToBlob(c, 'image/jpeg', 0.92),
+          thumb: await canvasToBlob(fitCanvas(c, 480), 'image/jpeg', 0.85),
           w: c.width,
           h: c.height
-        });
+        };
+        palette.photos.push(added);
       } catch (err) {
         console.error(err);
         alert('One of the photos could not be opened.');
       }
     }
-    await persist(files.length > 1 ? 'Photos added' : 'Photo added');
+    await persist(files.length > 1 ? 'Palette cards added' : 'Palette card added');
     render();
+    // One card: open it straight away, ready for "Find colours".
+    if (files.length === 1 && added) openCard(added.id);
   }
 
   // ---- sheets ----
@@ -175,8 +290,12 @@ export function renderPalette(root, { palette, save, tabbar }) {
     return dlg;
   }
 
+  function groupChips(attr, selected) {
+    return palette.groups.map((g) => `<button type="button" class="chip" ${attr}="${g.id}" aria-pressed="${g.id === selected}">${esc(g.name)}</button>`).join('');
+  }
+
   function openSwatch(gid, cid, isNew = false) {
-    let g = palette.groups.find((x) => x.id === gid);
+    const g = palette.groups.find((x) => x.id === gid);
     const c = g.colors.find((x) => x.id === cid);
     let target = g.id;
     const dlg = sheet(`
@@ -189,20 +308,19 @@ export function renderPalette(root, { palette, save, tabbar }) {
       </div>
       <div>
         <div class="field-label"><span id="s-g-label">Group</span></div>
-        <div class="chips wrap" role="group" aria-labelledby="s-g-label">
-          ${palette.groups.map((x) => `<button type="button" class="chip" data-sg="${x.id}" aria-pressed="${x.id === g.id}">${esc(x.name)}</button>`).join('')}
-        </div>
+        <div class="chips wrap" role="group" aria-labelledby="s-g-label">${groupChips('data-sg', g.id)}</div>
       </div>
       <button type="submit" class="btn-primary" value="ok">Done</button>
       <button type="button" class="btn-secondary danger" data-x="del">${icon('trash')} Remove this colour</button>`,
     async (d) => {
+      const from = palette.groups.find((x) => x.id === gid);
       if (d.returnValue === 'del') {
-        g.colors = g.colors.filter((x) => x.id !== c.id);
+        from.colors = from.colors.filter((x) => x.id !== c.id);
         await persist('Colour removed');
       } else {
         c.name = d.querySelector('#s-name').value.trim();
-        if (target !== g.id) {
-          g.colors = g.colors.filter((x) => x.id !== c.id);
+        if (target !== gid) {
+          from.colors = from.colors.filter((x) => x.id !== c.id);
           palette.groups.find((x) => x.id === target).colors.push(c);
         }
         await persist(isNew ? `Added to ${palette.groups.find((x) => x.id === target).name}` : null);
@@ -266,24 +384,25 @@ export function renderPalette(root, { palette, save, tabbar }) {
     });
   }
 
-  // ---- photo viewer with colour picking ----
-  async function openPhoto(pid) {
+  // ---- a palette card, large: find colours automatically or tap them ----
+  async function openCard(pid) {
     const photo = palette.photos.find((p) => p.id === pid);
+    const k = palette.photos.indexOf(photo);
     const dlg = document.createElement('dialog');
     dlg.className = 'viewer';
     dlg.innerHTML = `
       <div class="viewer-top">
         <button type="button" class="icon-btn light" data-v="close" aria-label="Close">${icon('back')}</button>
-        <span>Tap the photo to pick a colour</span>
-        <button type="button" class="icon-btn light" data-v="delete" aria-label="Delete this photo">${icon('trash')}</button>
+        <button type="button" class="viewer-title" data-v="rename"><span id="v-name">${esc(cardName(photo, k))}</span>${icon('pencil')}</button>
+        <button type="button" class="icon-btn light" data-v="delete" aria-label="Delete this palette card">${icon('trash')}</button>
       </div>
       <div class="viewer-stage" id="v-stage"><canvas id="v-cv"></canvas><span class="v-marker" id="v-marker" hidden></span></div>
-      <div class="picker-bar" id="v-bar" hidden>
-        <div class="picker-row"><span class="pal-chip big" id="v-chip"></span><strong id="v-hex"></strong>
+      <div class="picker-bar">
+        <button type="button" class="btn-primary" data-v="find">${icon('sparkle')} Find colours on this card</button>
+        <p class="picker-hint" id="v-hint">Or tap a colour on the card to add just that one.</p>
+        <div class="picker-row" id="v-row" hidden><span class="pal-chip big" id="v-chip"></span><strong id="v-hex"></strong>
           <button type="button" class="btn-small" data-v="add">${icon('plus')} Add</button></div>
-        <div class="chips scroll-x" id="v-groups">
-          ${palette.groups.map((g) => `<button type="button" class="chip" data-vg="${g.id}" aria-pressed="${g.id === lastGroup}">${esc(g.name)}</button>`).join('')}
-        </div>
+        <div class="chips scroll-x" id="v-groups" aria-label="Add to group">${groupChips('data-vg', lastGroup)}</div>
       </div>`;
     document.body.appendChild(dlg);
     dlg.showModal();
@@ -300,22 +419,22 @@ export function renderPalette(root, { palette, save, tabbar }) {
       const y = Math.round((e.clientY - r.top) * (cv.height / r.height));
       // Average a small square so fabric texture and JPEG noise don't skew the colour.
       let R = 0, G = 0, B = 0, n = 0;
-      const k = Math.max(2, Math.round(cv.width / 400));
-      for (let yy = Math.max(0, y - k); yy <= Math.min(cv.height - 1, y + k); yy++) {
-        for (let xx = Math.max(0, x - k); xx <= Math.min(cv.width - 1, x + k); xx++) {
+      const s = Math.max(2, Math.round(cv.width / 400));
+      for (let yy = Math.max(0, y - s); yy <= Math.min(cv.height - 1, y + s); yy++) {
+        for (let xx = Math.max(0, x - s); xx <= Math.min(cv.width - 1, x + s); xx++) {
           const i = (yy * cv.width + xx) * 4;
           R += data[i]; G += data[i + 1]; B += data[i + 2]; n++;
         }
       }
-      const h = (v) => Math.round(v / n).toString(16).padStart(2, '0');
-      picked = `#${h(R)}${h(G)}${h(B)}`;
+      picked = toHex(R / n, G / n, B / n);
       const stage = dlg.querySelector('#v-stage').getBoundingClientRect();
       const m = dlg.querySelector('#v-marker');
       m.hidden = false;
       m.style.left = `${e.clientX - stage.left}px`;
       m.style.top = `${e.clientY - stage.top}px`;
       m.style.background = picked;
-      dlg.querySelector('#v-bar').hidden = false;
+      dlg.querySelector('#v-row').hidden = false;
+      dlg.querySelector('#v-hint').hidden = true;
       dlg.querySelector('#v-chip').style.background = picked;
       dlg.querySelector('#v-hex').textContent = picked.toUpperCase();
     });
@@ -333,13 +452,84 @@ export function renderPalette(root, { palette, save, tabbar }) {
         g.colors.push({ id: uid(), hex: picked, name: '' });
         await persist(`Added to ${g.name} (${g.colors.length})`);
       }
-      if (v === 'delete' && confirm('Delete this photo? The colours you picked from it stay.')) {
+      if (v === 'find') {
+        const btn = e.target.closest('[data-v]');
+        btn.disabled = true;
+        btn.lastChild.textContent = ' Looking for colours…';
+        await new Promise((r) => setTimeout(r, 30)); // let the button text show
+        const found = findCardColours(full);
+        btn.disabled = false;
+        btn.lastChild.textContent = ' Find colours on this card';
+        showFound(found);
+      }
+      if (v === 'rename') {
+        sheet(`<h2>Palette card name</h2>
+          <div><label class="field-label" for="c-name">Name</label>
+          <input id="c-name" class="text-input" type="text" maxlength="40" autocomplete="off" placeholder="e.g. Neutrals, Accents" value="${esc(photo.name || '')}"></div>
+          <button type="submit" class="btn-primary" value="ok">Save</button>`,
+        async (d) => {
+          if (d.returnValue !== 'ok') return;
+          photo.name = d.querySelector('#c-name').value.trim();
+          dlg.querySelector('#v-name').textContent = cardName(photo, k);
+          await persist();
+        });
+      }
+      if (v === 'delete' && confirm('Delete this palette card? The colours you saved from it stay.')) {
         palette.photos = palette.photos.filter((p) => p.id !== pid);
-        await persist('Photo deleted');
+        await persist('Palette card deleted');
         dlg.close();
       }
     });
     dlg.addEventListener('close', () => { dlg.remove(); render(); });
+
+    // Results: every colour found, tap to leave one out, then add them to a group.
+    function showFound(found) {
+      const fresh = newColours(palette, found);
+      const skipped = found.length - fresh.length;
+      if (!fresh.length) {
+        alert(found.length
+          ? 'All colours on this card are already in your palette.'
+          : 'No colour patches were found. Try a sharper photo straight from above, in daylight, or tap the colours one by one.');
+        return;
+      }
+      const keep = new Set(fresh.map((_, i) => i));
+      let target = lastGroup;
+      const res = sheet(`
+        <h2>${plural(fresh.length, 'colour')} found</h2>
+        <p class="muted small">Tap a colour to leave it out.${skipped ? ` ${plural(skipped, 'colour')} already in your palette ${skipped === 1 ? 'was' : 'were'} skipped.` : ''}</p>
+        <div class="pal-found">${fresh.map((c, i) => `<button type="button" class="pal-found-chip" data-f="${i}" aria-pressed="true" aria-label="${c.hex}" style="background:${c.hex}">${icon('check')}</button>`).join('')}</div>
+        <div>
+          <div class="field-label"><span id="f-g-label">Add to</span></div>
+          <div class="chips wrap" role="group" aria-labelledby="f-g-label">${groupChips('data-fg', target)}</div>
+        </div>
+        <button type="submit" class="btn-primary" value="ok" id="f-add">Add ${plural(fresh.length, 'colour')}</button>
+        <button type="button" class="text-btn center" data-x="close">Cancel</button>`,
+      async (d) => {
+        if (d.returnValue !== 'ok' || !keep.size) return;
+        const g = palette.groups.find((x) => x.id === target) || palette.groups[0];
+        fresh.forEach((c, i) => { if (keep.has(i)) g.colors.push({ id: uid(), hex: c.hex, name: '' }); });
+        lastGroup = target;
+        dlg.querySelectorAll('[data-vg]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.vg === lastGroup)));
+        await persist(`${plural(keep.size, 'colour')} added to ${g.name}`);
+      });
+      res.addEventListener('click', (e) => {
+        const f = e.target.closest('[data-f]');
+        if (f) {
+          const i = +f.dataset.f;
+          keep.has(i) ? keep.delete(i) : keep.add(i);
+          f.setAttribute('aria-pressed', String(keep.has(i)));
+          const addBtn = res.querySelector('#f-add');
+          addBtn.textContent = `Add ${plural(keep.size, 'colour')}`;
+          addBtn.disabled = !keep.size;
+        }
+        const fg = e.target.closest('[data-fg]');
+        if (fg) {
+          target = fg.dataset.fg;
+          res.querySelectorAll('[data-fg]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.fg === target)));
+        }
+        if (e.target.closest('[data-x=close]')) res.close();
+      });
+    }
   }
 
   root.onclick = (e) => {
@@ -349,7 +539,7 @@ export function renderPalette(root, { palette, save, tabbar }) {
     if (act === 'swatch') openSwatch(b.dataset.g, b.dataset.c);
     else if (act === 'group') openGroup(b.dataset.g);
     else if (act === 'add-group') openGroup(null);
-    else if (act === 'photo') openPhoto(b.dataset.id);
+    else if (act === 'photo') openCard(b.dataset.id);
   };
 
   render();

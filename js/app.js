@@ -2,7 +2,7 @@ import * as db from './db.js';
 import { CATEGORIES, SEASONS, catById, categoriesFor, revealSelected, seasonsFromNow, currentSeason } from './constants.js';
 import { esc, toast, blobUrl, dropUrl, plural } from './util.js';
 import { icon } from './icons.js';
-import { colorName, blobToCanvas, fitCanvas, encodeTransparent, dominantColor } from './images.js';
+import { colorName, blobToCanvas, fitCanvas, encodeTransparent, dominantColor, pieceColour } from './images.js';
 import { renderWishlist, renderWishForm } from './wish.js';
 import { renderAdd } from './add.js';
 import { renderBuilder, renderOutfitThumb } from './builder.js';
@@ -13,7 +13,7 @@ import { VERSION } from './version.js';
 
 const app = document.getElementById('app');
 const fileInput = document.getElementById('file-input');
-const state = { items: [], outfits: [], wishes: [], palette: null, filter: 'all', query: '', paletteOnly: false };
+const state = { items: [], outfits: [], wishes: [], palette: null, filter: 'all', query: '', paletteOnly: false, wishPaletteOnly: false };
 let cleanup = null;
 let pendingFile = null;
 let pendingTarget = 'add'; // which screen the chosen photo goes to: 'add' (closet) or 'wish/new'
@@ -326,10 +326,24 @@ async function takeShared() {
   }
 }
 
+/** Wishes saved before 1.12 have no colour yet: work it out once from their picture. */
+async function fillWishColours() {
+  const missing = state.wishes.filter((w) => !w.color && w.thumb);
+  if (!missing.length) return;
+  for (const w of missing) {
+    try {
+      const hex = pieceColour(await blobToCanvas(w.thumb));
+      Object.assign(w, { color: hex, colorName: colorName(hex) });
+      await db.put('wishes', w);
+    } catch (err) { console.warn('No colour for wish', w.id, err); }
+  }
+  if (location.hash === '#/wishlist') route();
+}
+
 async function wishToItem(w) {
   const c = await blobToCanvas(w.image);
   const full = fitCanvas(c, 1000);
-  const hex = dominantColor(c);
+  const hex = w.color || dominantColor(c);
   return {
     id: w.id,
     name: w.name,
@@ -387,6 +401,9 @@ async function route() {
       cleanup = renderWishlist(app, {
         wishes: state.wishes,
         tabbar: tabbar('wishlist'),
+        palette: state.palette,
+        paletteOnly: state.wishPaletteOnly,
+        onTogglePalette: () => { state.wishPaletteOnly = !state.wishPaletteOnly; route(); },
         onAdd: () => pickPhoto('wish/new'),
         onEdit: (wid) => go(`wish/${wid}`)
       });
@@ -414,6 +431,7 @@ async function route() {
         wish,
         file,
         shared,
+        palette: state.palette,
         onCancel: () => back(),
         onSave: async (w) => {
           await db.put('wishes', w);
@@ -483,6 +501,7 @@ document.getElementById('version').textContent = `v${VERSION}`;
 (async () => {
   try {
     await reload();
+    fillWishColours();
   } catch (err) {
     console.error(err);
     app.innerHTML = '<div class="empty"><h2>Storage is not available</h2><p>Open the app in Chrome or Safari, outside private browsing.</p></div>';

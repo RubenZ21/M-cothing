@@ -326,3 +326,24 @@ dialog.viewer::backdrop { background: #1f1c1d; }
 .picker-row .btn-small { display: flex; align-items: center; gap: 4px; }
 .picker-row .btn-small .icon { width: 18px; height: 18px; }
 .picker-bar .chips { padding: 0 16px; }
+
+/* palette cards */
+.palette .card > h2 { font-size: 26px; }
+.pal-cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.pal-card { border: 1px solid var(--soft-line); border-radius: 14px; background: var(--surface); padding: 0 0 8px; display: flex; flex-direction: column; gap: 6px; text-align: left; overflow: hidden; }
+.pal-card-img { display: block; aspect-ratio: 4 / 3; background: var(--tile); }
+.pal-card-img img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.pal-card-name { padding: 0 10px; font-size: 14px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pal-card.add { aspect-ratio: auto; min-height: 140px; align-items: center; justify-content: center; gap: 8px; border: 2px dashed var(--line); color: var(--accent-ink); font-size: 14px; font-weight: 600; cursor: pointer; padding: 12px; text-align: center; }
+.pal-card.add .icon { width: 28px; height: 28px; }
+.viewer-title { border: 0; background: none; color: #fff; font: inherit; font-size: 15px; font-weight: 600; display: inline-flex; align-items: center; gap: 6px; min-height: 44px; max-width: 60%; }
+.viewer-title span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.viewer-title .icon { width: 16px; height: 16px; opacity: .8; }
+.picker-bar > .btn-primary { width: auto; margin: 0 16px; }
+.picker-hint { margin: 0; padding: 0 16px; font-size: 13px; color: var(--muted); text-align: center; }
+.pal-found { display: grid; grid-template-columns: repeat(auto-fill, minmax(44px, 1fr)); gap: 8px; max-height: 40dvh; overflow-y: auto; }
+.pal-found-chip { aspect-ratio: 1; border-radius: 12px; border: 1px solid rgba(0, 0, 0, .12); display: grid; place-items: center; padding: 0; }
+.pal-found-chip .icon { width: 18px; height: 18px; stroke-width: 3; color: #fff; filter: drop-shadow(0 0 2px rgba(0, 0, 0, .6)); }
+.pal-found-chip[aria-pressed=false] { opacity: .25; }
+.pal-found-chip[aria-pressed=false] .icon { display: none; }
+.wcard-img .pal-mark { right: 8px; top: 8px; }

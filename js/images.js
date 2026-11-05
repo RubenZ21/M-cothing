@@ -93,6 +93,19 @@ export function hasTransparency(src) {
   return share > 0.03 && share < 0.97;
 }
 
+/**
+ * Main colour of a picture of one item. Cut-outs: the visible pixels. Screenshots
+ * and photos with a background: the middle part, so the page or wall around the
+ * item doesn't count.
+ */
+export function pieceColour(src) {
+  if (hasTransparency(src)) return dominantColor(src);
+  const w = src.width * 0.5, h = src.height * 0.5;
+  const c = makeCanvas(w, h);
+  c.getContext('2d').drawImage(src, src.width * 0.25, src.height * 0.25, w, h, 0, 0, c.width, c.height);
+  return dominantColor(c);
+}
+
 /** Most common colour of the visible pixels. */
 export function dominantColor(src) {
   const small = fitCanvas(src, 72);
