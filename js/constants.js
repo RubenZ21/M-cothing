@@ -1,5 +1,6 @@
 export const CATEGORIES = [
   { id: 'tops', label: 'Tops', one: 'top' },
+  { id: 'blouses', label: 'Blouses', one: 'blouse' },
   { id: 'pants', label: 'Pants', one: 'pants' },
   { id: 'skirts', label: 'Skirts', one: 'skirt' },
   { id: 'dresses', label: 'Dresses', one: 'dress' },
@@ -58,6 +59,7 @@ export function seasonsFromNow() {
 export const PLACEMENT = {
   hats: { x: 0.5, y: 0.13, w: 0.34 },
   tops: { x: 0.5, y: 0.33, w: 0.52 },
+  blouses: { x: 0.5, y: 0.33, w: 0.52 },
   jackets: { x: 0.5, y: 0.35, w: 0.58 },
   dresses: { x: 0.5, y: 0.45, w: 0.5 },
   pants: { x: 0.5, y: 0.64, w: 0.42 },
