@@ -1,0 +1,12 @@
+# Files in the repo root that are not part of the app and must not be served.
+.git
+.gitignore
+.assetsignore
+.wrangler
+.DS_Store
+node_modules
+wrangler.jsonc
+package.json
+package-lock.json
+README.md
+CLAUDE.md

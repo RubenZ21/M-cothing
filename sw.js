@@ -1,12 +1,20 @@
 // Offline support. Online, the app always loads the newest files; the cache is
 // only used when the network is unavailable. Bump CACHE with every release.
-const CACHE = 'wardrobe-1.17'; // keep in step with js/version.js
+const CACHE = 'wardrobe-1.18'; // keep in step with js/version.js
 const SHELL = [
-  './', 'index.html', 'styles.css', 'manifest.webmanifest',
+  // './' is the app page. 'index.html' is deliberately not listed: Cloudflare answers it with a
+  // redirect to './', and a redirected answer cannot be served for a page load.
+  './', 'styles.css', 'manifest.webmanifest',
   'js/app.js', 'js/add.js', 'js/bg.js', 'js/builder.js', 'js/constants.js', 'js/db.js',
   'js/icons.js', 'js/images.js', 'js/settings.js', 'js/util.js', 'js/version.js', 'js/wish.js', 'js/link.js', 'js/share.js', 'js/backup.js', 'js/palette.js', 'js/categories.js', 'vendor/fflate.js',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png'
 ];
+
+// The app sits behind Cloudflare Access. When the login has expired, Access answers every
+// request with a redirect to its login page instead of the file. Those answers must never go
+// into the cache, or the offline copy of the app would be replaced by a login page. So only a
+// real, direct answer from this site is cached.
+const cacheable = (res) => res && res.ok && res.type === 'basic' && !res.redirected;
 
 self.addEventListener('install', (e) => {
   // cache: 'reload' skips the browser's HTTP cache so a new version never stores old files.
@@ -28,8 +36,12 @@ self.addEventListener('activate', (e) => {
 // the cache when offline or when the network takes too long.
 async function networkFirst(req) {
   const cache = await caches.open(CACHE);
-  const fresh = fetch(req.mode === 'navigate' ? req.url : req, { cache: 'no-cache' }).then((res) => {
-    if (res.ok) cache.put(req, res.clone());
+  // Page loads: redirect 'manual' hands a redirect (to './', or to the Access login when the
+  // login has expired) back to the browser to follow, instead of failing and showing the cached app.
+  const fresh = (req.mode === 'navigate'
+    ? fetch(req.url, { cache: 'no-cache', redirect: 'manual' })
+    : fetch(req, { cache: 'no-cache' })).then((res) => {
+    if (cacheable(res)) cache.put(req, res.clone());
     return res;
   });
   const timeout = new Promise((resolve) => setTimeout(resolve, 5000, null));
@@ -38,7 +50,7 @@ async function networkFirst(req) {
     if (res) return res;
   } catch { /* offline */ }
   const hit = await cache.match(req, { ignoreSearch: true })
-    || (req.mode === 'navigate' ? await cache.match('index.html') : null);
+    || (req.mode === 'navigate' ? await cache.match('./') : null);
   return hit || fresh.catch(() => Response.error());
 }
 
@@ -50,7 +62,7 @@ async function staleWhileRevalidate(req) {
     if (res.ok || res.type === 'opaque') cache.put(req, res.clone());
     return res;
   }).catch(() => null);
-  return hit || (await fresh) || (req.mode === 'navigate' ? cache.match('index.html') : Response.error());
+  return hit || (await fresh) || (req.mode === 'navigate' ? cache.match('./') : Response.error());
 }
 
 // Android: "Share" a shop page (and/or a screenshot) to the installed app.
@@ -77,6 +89,8 @@ self.addEventListener('fetch', (e) => {
   const url = new URL(req.url);
   const sameOrigin = url.origin === self.location.origin;
   const fonts = url.hostname === 'fonts.googleapis.com' || url.hostname === 'fonts.gstatic.com';
+  // Cloudflare Access endpoints (login callback, logout): always straight to the network.
+  if (sameOrigin && url.pathname.startsWith('/cdn-cgi/')) return;
   // The background-removal model is cached by its own library; let it pass.
   if (sameOrigin) e.respondWith(networkFirst(req));
   else if (fonts) e.respondWith(staleWhileRevalidate(req));

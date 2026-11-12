@@ -1,0 +1,15 @@
+// Cloudflare Worker that only serves the static files of this repo (no Worker script).
+// Deploy with: npx wrangler deploy  (or the dashboard's GitHub connection)
+// Access (login) is switched on in the Cloudflare dashboard, not here:
+// Workers & Pages > m-wardrobe > Access.
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "m-wardrobe",
+  "compatibility_date": "2026-11-11",
+  "workers_dev": true,
+  "preview_urls": true,
+  "assets": {
+    // The app lives in the repo root; .assetsignore keeps non-app files out of the upload.
+    "directory": "./"
+  }
+}
