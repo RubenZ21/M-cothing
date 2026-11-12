@@ -1,6 +1,6 @@
 // Offline support. Online, the app always loads the newest files; the cache is
 // only used when the network is unavailable. Bump CACHE with every release.
-const CACHE = 'wardrobe-1.18'; // keep in step with js/version.js
+const CACHE = 'wardrobe-1.19'; // keep in step with js/version.js
 const SHELL = [
   // './' is the app page. 'index.html' is deliberately not listed: Cloudflare answers it with a
   // redirect to './', and a redirected answer cannot be served for a page load.
