@@ -18,6 +18,15 @@ export function backupDue(state) {
   return (state.items.length > 0 || state.wishes.length > 0) && Date.now() - lastBackup() > BACKUP_EVERY_DAYS * 86400000;
 }
 
+/** Why a restore failed, in words she can act on. */
+function restoreMessage(err) {
+  if (err?.code === 'other-app') return 'This is a backup of My Home, not of Minja’s Wardrobe. Open My Home and restore it there.';
+  if (err?.code === 'damaged') return 'This backup file is damaged or was not downloaded completely. Try another copy of it.';
+  if (err?.name === 'QuotaExceededError' || /quota|storage/i.test(err?.message || '')) return 'The phone does not have enough free storage for this backup. Free up some space and restore the same file again.';
+  if (err?.code === 'not-backup') return 'That file is not a backup of Minja’s Wardrobe. Choose the .zip file this app saved (its name starts with “wardrobe-backup”).';
+  return 'That file could not be restored. Choose a backup saved by this app.';
+}
+
 export function renderSettings(root, { state, reload, tabbar }) {
   root.className = 'app';
   root.innerHTML = `
@@ -106,7 +115,7 @@ export function renderSettings(root, { state, reload, tabbar }) {
     if (!file) return;
     try {
       toast('Reading backup…', 4000);
-      const { items, outfits, wishes, palette, categories } = await readBackup(file);
+      const { items, outfits, wishes, palette, categories, missing } = await readBackup(file);
       if (palette) await db.put('palette', palette);
       if (categories?.length) await db.put('meta', { id: 'categories', list: categories });
       await db.putMany('items', items);
@@ -115,10 +124,14 @@ export function renderSettings(root, { state, reload, tabbar }) {
       await reload();
       showLastBackup();
       showStorage();
-      toast(`Restored ${plural(items.length, 'piece')}, ${plural(outfits.length, 'outfit')} and ${plural(wishes.length, 'wish', 'wishes')}`);
+      const left = missing ? `. ${plural(missing, 'picture')} missing in the file` : '';
+      toast(`Restored ${plural(items.length, 'piece')}, ${plural(outfits.length, 'outfit')} and ${plural(wishes.length, 'wish', 'wishes')}${left}`, missing ? 7000 : 3500);
     } catch (err) {
       console.error(err);
-      alert('That file could not be restored. Choose a backup saved by this app.');
+      // Whatever was written before the error stays; restoring the same file again is safe.
+      await reload().catch(() => {});
+      showStorage();
+      alert(restoreMessage(err));
     }
   });
 
@@ -189,7 +202,8 @@ export function renderSettings(root, { state, reload, tabbar }) {
     a.download = file.name;
     document.body.appendChild(a);
     a.click();
-    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 4000);
+    // Kept for a minute: a large backup is still being written to Downloads after the tap.
+    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 60000);
     mark();
     toast(`Saved in Downloads: ${file.name} (${mb(file)}). On Samsung: My Files → Downloads.`, 7000);
   }

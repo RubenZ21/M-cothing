@@ -47,5 +47,8 @@ export async function putMany(store, values) {
     values.forEach((v) => s.put(v));
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error);
+    // Storage full ends the transaction with "abort", not always "error": without this the
+    // restore would wait forever.
+    tx.onabort = () => reject(tx.error || new Error('Transaction aborted'));
   });
 }
