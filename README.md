@@ -3,7 +3,7 @@
 Photograph your clothes, let the app cut them out, and mix them into outfits.
 It is a small web app that installs on a phone (PWA), like Minja's Kitchen.
 
-**Open it:** https://rubenz21.github.io/M-cothing/ (after GitHub Pages is turned on, see below)
+**Open it:** https://m-wardrobe.ruben-zubac.workers.dev/ (private: login by a one-time code sent by email; only Ruben and Minja are allowed)
 
 ## What it does
 
@@ -32,10 +32,11 @@ Because the photos only live on the phone:
 - Tap *Keep my photos safe* in Settings (asks the browser for persistent storage).
 - Save a backup now and then.
 
-## Turn on GitHub Pages
+## Hosting
 
-Repository **Settings → Pages → Build and deployment → Source: Deploy from a branch**, then choose the branch and folder `/ (root)`, and **Save**.
-After a minute the app is at `https://rubenz21.github.io/M-cothing/`.
+The app is served by Cloudflare as the Worker `m-wardrobe` (static files only, see `wrangler.jsonc`),
+behind Cloudflare Access. Every push to the `main` branch is deployed automatically; other
+branches are not. Files listed in `.assetsignore` are not served.
 
 ## Install on a phone
 

@@ -12,6 +12,8 @@ Mention the new version in the commit message.
 
 ## Stack
 
-Static PWA, no build step: `index.html`, `styles.css`, ES modules in `js/`, served by GitHub Pages.
+Static PWA, no build step: `index.html`, `styles.css`, ES modules in `js/`, served by Cloudflare
+(Worker `m-wardrobe`, behind Cloudflare Access). Cloudflare deploys the `main` branch on every push, so a
+change is only live once it is merged into `main`.
 Data lives on the phone in IndexedDB (`js/db.js`). `vendor/bg-removal.js` is a pre-bundled copy of
 `@imgly/background-removal` (see README for how to rebuild it).
